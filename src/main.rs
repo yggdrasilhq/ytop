@@ -69,7 +69,17 @@ fn main() -> Result<()> {
     //    The daemon exports it into every PTY it owns, local or over ssh.
     //    Guessing from a TTY check or a parent-process name would be right on
     //    this machine and wrong on the next one.
-    let session = std::env::var("YGGTERM_SESSION_ID").unwrap_or_default();
+    //
+    // ⭐ AND THERE ARE TWO SPELLINGS, WHICH THE SIBLING BUILD APP KNEW AND THIS
+    //    ONE DID NOT. A user who types `ssh <host>` by hand gets a stripped
+    //    environment — but stock OpenSSH forwards `LC_*`, so an app on the far
+    //    side of a MANUAL hop can still tell it is inside a surface. Checking
+    //    only the direct export is a real, reported bug: the pilot editor
+    //    answered "not inside yggterm" after exactly that hop.
+    let session = ["YGGTERM_SESSION_ID", "LC_YGGTERM_SESSION_ID"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+        .unwrap_or_default();
     if args.once || session.is_empty() {
         if session.is_empty() && !args.once {
             eprintln!(
