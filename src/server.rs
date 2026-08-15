@@ -83,13 +83,6 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
     }
 }
 
-fn schema_for(pane: &PaneState) -> Value {
-    match pane.view.mode.as_str() {
-        schema::MODE_DASH => schema::dash_view(&pane.view, &pane.rows_report),
-        schema::MODE_TOP | _ => schema::top_view(&pane.view, &pane.machines),
-    }
-}
-
 fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
     let Ok(peek) = stream.try_clone() else { return };
     let mut reader = BufReader::new(peek);
@@ -133,9 +126,13 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 "document_version": pane.stamp.to_string(),
             }));
         }
-        ("GET", "/pane/topo") | ("GET", "/pane/rail") => {
+        ("GET", "/pane/topo") => {
             let pane = state.lock().unwrap();
-            respond(stream, 200, &schema_for(&pane));
+            respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report));
+        }
+        ("GET", "/pane/rail") => {
+            let pane = state.lock().unwrap();
+            respond(stream, 200, &schema::rail_view(&pane.view, &pane.machines, &pane.rows_report));
         }
         ("POST", "/action") => {
             let action = body["action"].as_str().unwrap_or("");
@@ -145,8 +142,8 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
             if action == "mode" {
                 pane.view.mode = value.to_string();
                 pane.touch();
-            } else if action == "tab" {
-                pane.view.dash_tab = value.to_string();
+            } else if let Some(host) = action.strip_prefix("select_host:") {
+                pane.view.selected_host = host.to_string();
                 pane.touch();
             } else if action == "select_host" {
                 pane.view.selected_host = value.to_string();

@@ -70,7 +70,6 @@ fn main() -> Result<()> {
     {
         let mut pane = control.state.lock().unwrap();
         pane.view.mode = args.mode.clone();
-        pane.view.dash_tab = args.tab.clone();
     }
 
     let running = Arc::new(AtomicBool::new(true));
