@@ -21,9 +21,11 @@
 //! canvas smuggled into this repo.
 
 use crate::fleet::Machine;
+use crate::rows::{FleetRowsReport, RowInfo};
 use serde_json::{json, Value};
 
 pub const TAB_TOPOLOGY: &str = "topology";
+pub const TAB_ROWS: &str = "rows";
 pub const TAB_BOOTER: &str = "booter";
 
 /// What the pane is showing and what the user has typed into it.
@@ -36,7 +38,7 @@ pub struct View {
 
 impl Default for View {
     fn default() -> Self {
-        Self { tab: TAB_TOPOLOGY.to_string(), filter: String::new(), notice: None }
+        Self { tab: TAB_ROWS.to_string(), filter: String::new(), notice: None }
     }
 }
 
@@ -116,6 +118,7 @@ fn header(view: &View) -> Vec<Value> {
         //    highlighted and nothing says why.
         "active": view.tab,
         "tabs": [
+            {"id": TAB_ROWS, "label": "Fleet Rows"},
             {"id": TAB_TOPOLOGY, "label": "Topology"},
             {"id": TAB_BOOTER, "label": "Booter"},
         ],
@@ -715,7 +718,128 @@ pub fn booter_document(view: &View, states: &[Value]) -> Value {
         body.push('\n');
     }
     widgets.push(json!({"kind": "markdown", "id": "body", "source": body}));
-    json!({ "title": "yggtopo — the booter", "widgets": widgets })
+    json!({ "title": "ytop — the booter", "widgets": widgets })
+}
+
+// ─── the fleet rows tab ─────────────────────────────────────────────────────────
+
+/// A birds-eye view of all N.x rows across the fleet: liveness, twins, transcripts, and supervision.
+pub fn rows_view(view: &View, report: &FleetRowsReport) -> Value {
+    let mut widgets = header(view);
+    widgets.push(json!({
+        "kind": "search-box",
+        "id": "filter",
+        "action": "filter",
+        "value": view.filter,
+        "placeholder": "filter rows by seat, campaign, role, or uuid",
+    }));
+
+    if let Some(hold) = &report.quota_hold {
+        widgets.push(section("⏸ Quota Hold Active", false));
+        widgets.push(label(format!("Fleet-wide quota hold: {hold} — no automatic wakes delivered.")));
+    }
+
+    widgets.push(section("Fleet Rows Overview", false));
+    widgets.push(label(format!(
+        "Total Seats: {}  ·  Live Agents: {}  ·  Twin Alarms: {}  ·  Leaked Subshells: {}  ·  Transcripts: {:.1} MB",
+        report.total_rows, report.live_count, report.twin_count, report.leak_count, report.total_transcript_mb
+    )));
+
+    for (campaign, rows) in &report.campaigns {
+        let matching_rows: Vec<&RowInfo> = rows
+            .iter()
+            .filter(|r| {
+                matches(
+                    &view.filter,
+                    &[
+                        &r.seat,
+                        &r.campaign,
+                        &r.role,
+                        &r.uuid,
+                        &r.title,
+                        &r.supervision_state,
+                    ],
+                )
+            })
+            .collect();
+
+        if matching_rows.is_empty() {
+            continue;
+        }
+
+        widgets.push(section(format!("Campaign: {campaign} ({} rows)", rows.len()), true));
+
+        for r in matching_rows {
+            let proc_str = if r.twin_alert {
+                format!("⛔ TWIN DUPLICATE ({:?})", r.pids)
+            } else if !r.pids.is_empty() {
+                if r.leaked_child_loops > 0 {
+                    format!("LIVE PID {:?} + ⚠️ {} leaked child loop(s)", r.pids, r.leaked_child_loops)
+                } else {
+                    format!("LIVE PID {:?}", r.pids)
+                }
+            } else {
+                "💀 DEAD / NO PROCESS".to_string()
+            };
+
+            let burn_warn = if r.transcript_size_kb > 30 * 1024 {
+                " ⚠️ CRITICAL CONTEXT (>30MB)"
+            } else if r.transcript_size_kb > 10 * 1024 {
+                " ⚠️ HEAVY CONTEXT (>10MB)"
+            } else {
+                ""
+            };
+
+            let title_line = format!(
+                "Seat {} · {} [{}]",
+                r.seat,
+                r.title,
+                r.role
+            );
+
+            let subtitle_line = format!(
+                "UUID: {}  ·  Host: {}  ·  Supervision: {}",
+                if r.uuid.len() >= 8 { &r.uuid[..8] } else { &r.uuid },
+                r.host,
+                r.supervision_state
+            );
+
+            let detail_line = format!(
+                "Process: {proc_str} | Transcript: {} KB ({} lines, mtime {active_mtime}){burn_warn}",
+                r.transcript_size_kb,
+                r.transcript_lines,
+                active_mtime = r.last_active_mtime
+            );
+
+            let status_dot = if r.twin_alert {
+                "transient"
+            } else if r.is_alive {
+                "durable"
+            } else {
+                ""
+            };
+
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("row:{}", r.uuid),
+                "title": title_line,
+                "subtitle": subtitle_line,
+                "detail": detail_line,
+                "status": status_dot,
+            }));
+        }
+    }
+
+    json!({
+        "title": "ytop — fleet rows",
+        "widgets": widgets,
+        "footer": [
+            label(format!(
+                "{} seats total · {} live · {} twins · {:.1} MB context",
+                report.total_rows, report.live_count, report.twin_count, report.total_transcript_mb
+            ))
+        ]
+    })
 }
 
 #[cfg(test)]

@@ -1,26 +1,11 @@
-//! yggtopo — `lstopo` + `htop`, for a yggterm fleet.
-//!
-//! The machines, the containers they host, and what is actually burning them
-//! right now, as ONE view. A libyggterm document-surface app: no UI code, no
-//! web engine, no canvas — it declares a widget schema and yggterm paints it as
-//! shell DOM, which is what keeps it screenshot-faithful and drivable by the
-//! host's own automation.
-//!
-//! Outside yggterm it is a plain CLI that prints the same reading, because an
-//! app that can only exist inside a GUI cannot be checked without one.
-//!
-//! ⭐ THE SECOND HALF OF THE APP IS AN OFF SWITCH. The fleet's booter is a
-//! watchdog that kicks stalled sessions; it could always be stood down by
-//! someone with a shell on the right machine who knew the verb, which is not an
-//! off switch but a rumour of one. The Booter tab shows who is armed, when they
-//! are due, and turns it off — which is the whole reason this app was built now
-//! rather than later.
+//! ytop — `htop` + fleet agent rows + booter, for a yggterm fleet.
 
 mod booter;
 mod fleet;
 mod manifest;
 mod osc;
 mod probe;
+mod rows;
 mod schema;
 mod server;
 
@@ -36,13 +21,13 @@ const HEARTBEAT: Duration = Duration::from_secs(4);
 
 #[derive(Parser)]
 #[command(
-    name = "yggtopo",
+    name = "ytop",
     version,
-    about = "lstopo + htop for a yggterm fleet (libyggterm document-surface app)"
+    about = "htop + fleet rows + booter for yggterm (libyggterm document-surface app)"
 )]
 struct Args {
     /// Which tab to open on.
-    #[arg(long, value_parser = ["topology", "booter"], default_value = "topology")]
+    #[arg(long, value_parser = ["rows", "topology", "booter"], default_value = "rows")]
     tab: String,
     /// Print one reading and exit, even inside yggterm.
     #[arg(long)]
@@ -65,17 +50,6 @@ fn main() -> Result<()> {
         return server::probe_once((!host.is_empty()).then_some(host));
     }
 
-    // ⛔ THE ENV VAR IS THE ONLY HONEST TEST FOR "AM I INSIDE YGGTERM".
-    //    The daemon exports it into every PTY it owns, local or over ssh.
-    //    Guessing from a TTY check or a parent-process name would be right on
-    //    this machine and wrong on the next one.
-    //
-    // ⭐ AND THERE ARE TWO SPELLINGS, WHICH THE SIBLING BUILD APP KNEW AND THIS
-    //    ONE DID NOT. A user who types `ssh <host>` by hand gets a stripped
-    //    environment — but stock OpenSSH forwards `LC_*`, so an app on the far
-    //    side of a MANUAL hop can still tell it is inside a surface. Checking
-    //    only the direct export is a real, reported bug: the pilot editor
-    //    answered "not inside yggterm" after exactly that hop.
     let session = ["YGGTERM_SESSION_ID", "LC_YGGTERM_SESSION_ID"]
         .into_iter()
         .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
@@ -83,11 +57,11 @@ fn main() -> Result<()> {
     if args.once || session.is_empty() {
         if session.is_empty() && !args.once {
             eprintln!(
-                "yggtopo: not running inside yggterm ($YGGTERM_SESSION_ID unset) — \
+                "ytop: not running inside yggterm ($YGGTERM_SESSION_ID unset) — \
                  printing one reading instead of opening a surface."
             );
         }
-        return server::print_once(args.json);
+        return server::print_once(&args.tab, args.json);
     }
 
     let control = server::spawn()?;

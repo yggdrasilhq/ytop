@@ -5,7 +5,7 @@
 //! HTTP over loopback — the same shape every libyggterm app uses, and small
 //! enough that a dependency would cost more than it saved.
 
-use crate::{booter, fleet, probe, schema};
+use crate::{booter, fleet, probe, rows, schema};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -36,12 +36,9 @@ fn topology_every() -> Duration {
 }
 
 /// How often the booter plane is re-read.
-///
-/// ⛔ SLOWER ON PURPOSE, BECAUSE `--due` CLASSIFIES. Answering "when is this row
-/// due" costs a live row-list call and a transcript read per subscriber — the
-/// same work the booter's own tick does. At the topology cadence that would
-/// mean doing a watchdog's work several times a second to draw a label.
 const BOOTER_EVERY: Duration = Duration::from_secs(15);
+/// How often the rows plane is re-read.
+const ROWS_EVERY: Duration = Duration::from_secs(4);
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(12);
 
@@ -49,6 +46,7 @@ pub struct PaneState {
     pub view: schema::View,
     pub machines: Vec<fleet::Machine>,
     pub booter_states: Vec<Value>,
+    pub rows_report: rows::FleetRowsReport,
     /// Bumped whenever the painted content could have changed. The GUI refetches
     /// a pane only when this moves, so it is the whole refresh mechanism.
     pub stamp: u64,
@@ -66,12 +64,13 @@ pub struct Server {
 }
 
 pub fn spawn() -> Result<Server> {
-    let listener = TcpListener::bind("127.0.0.1:0").context("binding the yggtopo control server")?;
+    let listener = TcpListener::bind("127.0.0.1:0").context("binding the ytop control server")?;
     let port = listener.local_addr()?.port();
     let state = Arc::new(Mutex::new(PaneState {
         view: schema::View::default(),
         machines: Vec::new(),
         booter_states: Vec::new(),
+        rows_report: rows::FleetRowsReport::default(),
         stamp: 0,
     }));
     {
@@ -92,13 +91,9 @@ pub fn spawn() -> Result<Server> {
 }
 
 /// The reading loop.
-///
-/// ⛔ IT SAMPLES OUTSIDE THE LOCK. Holding the pane mutex across an ssh fan-out
-/// would block every schema GET for the length of the slowest machine, so a
-/// host that is merely slow would look like an app that has frozen. Read first,
-/// then take the lock only to swap the result in.
 fn sampler(state: Arc<Mutex<PaneState>>) {
     let mut last_booter = Instant::now() - BOOTER_EVERY;
+    let mut last_rows = Instant::now() - ROWS_EVERY;
     loop {
         let hosts = fleet::roster();
         let readings = fleet::read_all(&hosts, PROBE_TIMEOUT);
@@ -106,6 +101,14 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
         {
             let mut pane = state.lock().unwrap();
             pane.machines = machines;
+            pane.touch();
+        }
+
+        if last_rows.elapsed() >= ROWS_EVERY {
+            last_rows = Instant::now();
+            let report = rows::scan_all_hosts();
+            let mut pane = state.lock().unwrap();
+            pane.rows_report = report;
             pane.touch();
         }
 
@@ -127,20 +130,14 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
 }
 
 /// ⛔ THE TWO PLACEMENTS PAINT DIFFERENT VOCABULARIES, SO THEY GET DIFFERENT
-/// SCHEMAS OF THE SAME VIEW. The rail renders every widget kind; the document
-/// body renders only `markdown` and multiline `text-input` and lifts the rest
-/// into a top bar. Serving the rail's schema to the viewport is how an app ends
-/// up with a blank page and a clean bill of health.
-///
-/// ⚠ ONE STATE, TWO RENDERINGS — never two states. The tab and the filter are
-/// the user's, not the pane's; a rail showing a different tab from the viewport
-/// beside it would be two answers to "what am I looking at".
+/// SCHEMAS OF THE SAME VIEW.
 fn schema_for(pane: &PaneState, document: bool) -> Value {
-    match (pane.view.tab == schema::TAB_BOOTER, document) {
-        (true, true) => schema::booter_document(&pane.view, &pane.booter_states),
-        (true, false) => schema::booter(&pane.view, &pane.booter_states),
-        (false, true) => schema::topology_document(&pane.view, &pane.machines),
-        (false, false) => schema::topology(&pane.view, &pane.machines),
+    match (pane.view.tab.as_str(), document) {
+        (schema::TAB_BOOTER, true) => schema::booter_document(&pane.view, &pane.booter_states),
+        (schema::TAB_BOOTER, false) => schema::booter(&pane.view, &pane.booter_states),
+        (schema::TAB_TOPOLOGY, true) => schema::topology_document(&pane.view, &pane.machines),
+        (schema::TAB_TOPOLOGY, false) => schema::topology(&pane.view, &pane.machines),
+        (schema::TAB_ROWS, _) | _ => schema::rows_view(&pane.view, &pane.rows_report),
     }
 }
 
@@ -324,16 +321,54 @@ fn respond(mut stream: TcpStream, status: u16, body: &Value) {
 
 /// One reading, printed. The app is a useful CLI outside yggterm too, and that
 /// is also how its data is checked without a GUI in the loop.
-pub fn print_once(as_json: bool) -> Result<()> {
+/// One reading, printed. The app is a useful CLI outside yggterm too, and that
+/// is also how its data is checked without a GUI in the loop.
+pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
+    if tab == schema::TAB_ROWS {
+        let report = rows::scan_all_hosts();
+        if as_json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
+        println!("==========================================================================================================");
+        println!("  Y T O P   —   F L E E T   A G E N T   R O W S   B I R D S - E Y E   V I E W");
+        println!("==========================================================================================================");
+        if let Some(hold) = &report.quota_hold {
+            println!("  ⏸ QUOTA HOLD ACTIVE: {hold}\n");
+        }
+        println!("  {:<6} {:<13} {:<14} {:<10} {:<30} {:<20} {}",
+            "SEAT", "ROLE", "CAMPAIGN", "UUID", "PROCESS STATUS", "TRANSCRIPT", "SUPERVISION");
+        println!("  {}", "-".repeat(110));
+
+        for r in &report.rows {
+            let proc_str = if r.twin_alert {
+                format!("⛔ TWIN ({:?})", r.pids)
+            } else if !r.pids.is_empty() {
+                if r.leaked_child_loops > 0 {
+                    format!("LIVE {:?} + ⚠️{} leaks", r.pids, r.leaked_child_loops)
+                } else {
+                    format!("LIVE {:?}", r.pids)
+                }
+            } else {
+                "💀 DEAD".to_string()
+            };
+
+            let t_str = format!("{} KB ({}L)", r.transcript_size_kb, r.transcript_lines);
+            let short_u = if r.uuid.len() >= 8 { &r.uuid[..8] } else { &r.uuid };
+
+            println!("  {:<6} {:<13} {:<14} {:<10} {:<30} {:<20} {}",
+                r.seat, r.role, r.campaign, short_u, proc_str, t_str, r.supervision_state);
+        }
+        println!("  {}", "=".repeat(110));
+        println!("  Total Seats: {}  ·  Live: {}  ·  Twin Duplicate Alarms: {}  ·  Leaked Subshells: {}  ·  Context: {:.1} MB",
+            report.total_rows, report.live_count, report.twin_count, report.leak_count, report.total_transcript_mb);
+        return Ok(());
+    }
+
     let hosts = fleet::roster();
     let readings = fleet::read_all(&hosts, PROBE_TIMEOUT);
     let machines = fleet::group(readings);
     if as_json {
-        // ⭐ THE GROUPING IS PART OF THE OUTPUT, NOT A HIDDEN STEP. Which hosts
-        //    the app believes share a physical machine — and the derived key it
-        //    believes it from — is the one claim here that cannot be checked by
-        //    looking at a single reading. Printing it is what makes it
-        //    falsifiable from outside.
         println!("{}", json!({
             "hosts": hosts,
             "machines": machines.iter().map(|m| json!({
