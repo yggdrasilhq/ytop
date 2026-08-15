@@ -130,6 +130,7 @@ fn run(host: Option<&str>, args: &[&str], timeout: Duration) -> Value {
 /// question a human actually arrives with. It costs a classification per
 /// subscriber, which is why the booter keeps it opt-in and why this plane is
 /// sampled on its own slower cadence rather than with the topology.
+#[allow(dead_code)]
 pub fn state(host: Option<&str>, timeout: Duration) -> Value {
     let mut value = run(host, &["list", "--json", "--due"], timeout);
     if value.get("host").is_none() {
@@ -138,7 +139,7 @@ pub fn state(host: Option<&str>, timeout: Duration) -> Value {
     value
 }
 
-/// Stand this host's booter down. `hours` of `None` means until re-armed.
+#[allow(dead_code)]
 pub fn disarm(host: Option<&str>, hours: Option<f64>, note: &str, timeout: Duration) -> Value {
     let hours_text;
     let mut args: Vec<&str> = vec!["disarm"];
@@ -157,12 +158,12 @@ pub fn disarm(host: Option<&str>, hours: Option<f64>, note: &str, timeout: Durat
     run(host, &args, timeout)
 }
 
+#[allow(dead_code)]
 pub fn arm(host: Option<&str>, timeout: Duration) -> Value {
     run(host, &["arm"], timeout)
 }
 
-/// Widen one subscriber's boot window. The booter clamps the value; yggtopo
-/// does not second-guess the clamp, it shows what came back.
+#[allow(dead_code)]
 pub fn defer(host: Option<&str>, uuid: &str, secs: u32, timeout: Duration) -> Value {
     let secs = secs.to_string();
     run(
@@ -172,13 +173,16 @@ pub fn defer(host: Option<&str>, uuid: &str, secs: u32, timeout: Duration) -> Va
     )
 }
 
-/// Stop watching one row.
-///
-/// ⛔ NEVER PASSES `--force`. The booter refuses to unsubscribe a MONITOR
-/// without it, on purpose — that refusal was written after a watch stood itself
-/// down and left the thing it watched unobserved for hours. A button that
-/// quietly forced past it would delete the protection and look like it worked.
-/// The refusal is surfaced to the human instead, who can then mean it.
+#[allow(dead_code)]
 pub fn unsubscribe(host: Option<&str>, uuid: &str, timeout: Duration) -> Value {
     run(host, &["unsubscribe", "--row", uuid], timeout)
+}
+
+pub fn set_rate_limit_hold(host: Option<&str>, duration: &str, reason: &str) -> Value {
+    let quoted_reason = format!("'{}'", reason.replace('\'', ""));
+    run(host, &["hold", "--until", duration, "--reason", &quoted_reason], Duration::from_secs(5))
+}
+
+pub fn release_rate_limit_hold(host: Option<&str>) -> Value {
+    run(host, &["hold", "--release"], Duration::from_secs(5))
 }

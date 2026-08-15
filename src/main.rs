@@ -1,4 +1,4 @@
-//! ytop — `htop` + fleet agent rows + booter, for a yggterm fleet.
+//! ytop — `htop` + fleet agent rows + booter + ZFS/LXC topology, for a yggterm fleet.
 
 mod booter;
 mod fleet;
@@ -23,20 +23,22 @@ const HEARTBEAT: Duration = Duration::from_secs(4);
 #[command(
     name = "ytop",
     version,
-    about = "htop + fleet rows + booter for yggterm (libyggterm document-surface app)"
+    about = "Modern infrastructure + fleet agent cockpit for yggterm (libyggterm document surface)"
 )]
 struct Args {
-    /// Which tab to open on.
-    #[arg(long, value_parser = ["rows", "topology", "booter"], default_value = "rows")]
+    /// Operational mode: "top" (machines, ZFS, LXC) or "dash" (agent fleet & jankbox)
+    #[arg(long, value_parser = ["top", "dash"], default_value = "top")]
+    mode: String,
+    /// Dash subtab: "rows", "jankbox", or "supervision"
+    #[arg(long, value_parser = ["rows", "jankbox", "supervision"], default_value = "rows")]
     tab: String,
     /// Print one reading and exit, even inside yggterm.
     #[arg(long)]
     once: bool,
-    /// With --once, print the raw readings instead of the tree.
+    /// With --once, print the raw JSON reading.
     #[arg(long)]
     json: bool,
-    /// Run the host probe alone and print its JSON. `--probe <ssh-alias>` runs
-    /// it there. The self-check for "is this machine readable at all".
+    /// Run the host probe alone and print its JSON. `--probe <ssh-alias>` runs it there.
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     probe: Option<String>,
 }
@@ -61,18 +63,16 @@ fn main() -> Result<()> {
                  printing one reading instead of opening a surface."
             );
         }
-        return server::print_once(&args.tab, args.json);
+        return server::print_once(&args.mode, args.json);
     }
 
     let control = server::spawn()?;
     {
         let mut pane = control.state.lock().unwrap();
-        pane.view.tab = args.tab.clone();
+        pane.view.mode = args.mode.clone();
+        pane.view.dash_tab = args.tab.clone();
     }
 
-    // ⛔ CLOSE ON THE WAY OUT, OR THE OVERLAY OUTLIVES THE APP by the length of
-    //    the expiry. The heartbeat covers a SIGKILL; this covers the ordinary
-    //    case, which is the one the user actually sees.
     let running = Arc::new(AtomicBool::new(true));
     {
         let running = Arc::clone(&running);
@@ -86,9 +86,6 @@ fn main() -> Result<()> {
     let mut last_stamp = u64::MAX;
     while running.load(Ordering::SeqCst) {
         let stamp = control.state.lock().unwrap().stamp;
-        // The declare is idempotent and is the liveness signal, so it goes out
-        // on every beat whether or not the content moved; the stamp is what
-        // tells the GUI to refetch.
         osc::emit_declare(&session, &control.url, &stamp.to_string());
         last_stamp = stamp;
         std::thread::sleep(HEARTBEAT);

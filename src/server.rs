@@ -1,9 +1,7 @@
-//! yggtopo's control endpoint, and the sampling loop behind it.
+//! ytop's control server and action handler.
 //!
-//! `GET /ping` (liveness + the change stamp), `GET /pane/<id>` (the schema the
-//! GUI paints), `POST /action` (everything the user does in it). Hand-rolled
-//! HTTP over loopback — the same shape every libyggterm app uses, and small
-//! enough that a dependency would cost more than it saved.
+//! `GET /ping` (liveness + change stamp), `GET /pane/<id>` (the rich Dioxus schema),
+//! `POST /action` (all interactive actions: mode toggle, container uncollapse, jank cleanup, supervision).
 
 use crate::{booter, fleet, probe, rows, schema};
 use anyhow::{Context, Result};
@@ -13,42 +11,14 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// How often the machines are re-read.
-///
-/// ⚠ THIS IS AN SSH FAN-OUT, NOT A LOCAL READ. htop refreshes twice a second
-/// because it reads `/proc`; a fleet view reaching three machines cannot, and
-/// pretending otherwise just means every refresh overlaps the last. Two seconds
-/// is fast enough to watch a build start and slow enough that the probes never
-/// queue behind each other.
-const TOPOLOGY_EVERY_DEFAULT_SECS: u64 = 2;
-
-/// ⚠ A KNOB, BECAUSE THE RIGHT NUMBER IS A PROPERTY OF THE FLEET, NOT OF THIS
-/// FILE. Three machines on a LAN want two seconds; a dozen over a slow link
-/// want twenty, and hard-coding either makes the other unusable.
-fn topology_every() -> Duration {
-    Duration::from_secs(
-        std::env::var("YGGTOPO_REFRESH_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(TOPOLOGY_EVERY_DEFAULT_SECS),
-    )
-}
-
-/// How often the booter plane is re-read.
-const BOOTER_EVERY: Duration = Duration::from_secs(15);
-/// How often the rows plane is re-read.
+const TOPOLOGY_EVERY: Duration = Duration::from_secs(2);
 const ROWS_EVERY: Duration = Duration::from_secs(4);
-
-const PROBE_TIMEOUT: Duration = Duration::from_secs(12);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct PaneState {
     pub view: schema::View,
     pub machines: Vec<fleet::Machine>,
-    pub booter_states: Vec<Value>,
     pub rows_report: rows::FleetRowsReport,
-    /// Bumped whenever the painted content could have changed. The GUI refetches
-    /// a pane only when this moves, so it is the whole refresh mechanism.
     pub stamp: u64,
 }
 
@@ -69,7 +39,6 @@ pub fn spawn() -> Result<Server> {
     let state = Arc::new(Mutex::new(PaneState {
         view: schema::View::default(),
         machines: Vec::new(),
-        booter_states: Vec::new(),
         rows_report: rows::FleetRowsReport::default(),
         stamp: 0,
     }));
@@ -90,9 +59,7 @@ pub fn spawn() -> Result<Server> {
     Ok(Server { url: format!("http://127.0.0.1:{port}"), state })
 }
 
-/// The reading loop.
 fn sampler(state: Arc<Mutex<PaneState>>) {
-    let mut last_booter = Instant::now() - BOOTER_EVERY;
     let mut last_rows = Instant::now() - ROWS_EVERY;
     loop {
         let hosts = fleet::roster();
@@ -112,32 +79,14 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
             pane.touch();
         }
 
-        if last_booter.elapsed() >= BOOTER_EVERY {
-            last_booter = Instant::now();
-            let states: Vec<Value> = hosts
-                .iter()
-                .map(|host| {
-                    let target = if host == fleet::LOCAL { None } else { Some(host.as_str()) };
-                    booter::state(target, PROBE_TIMEOUT)
-                })
-                .collect();
-            let mut pane = state.lock().unwrap();
-            pane.booter_states = states;
-            pane.touch();
-        }
-        std::thread::sleep(topology_every());
+        std::thread::sleep(TOPOLOGY_EVERY);
     }
 }
 
-/// ⛔ THE TWO PLACEMENTS PAINT DIFFERENT VOCABULARIES, SO THEY GET DIFFERENT
-/// SCHEMAS OF THE SAME VIEW.
-fn schema_for(pane: &PaneState, document: bool) -> Value {
-    match (pane.view.tab.as_str(), document) {
-        (schema::TAB_BOOTER, true) => schema::booter_document(&pane.view, &pane.booter_states),
-        (schema::TAB_BOOTER, false) => schema::booter(&pane.view, &pane.booter_states),
-        (schema::TAB_TOPOLOGY, true) => schema::topology_document(&pane.view, &pane.machines),
-        (schema::TAB_TOPOLOGY, false) => schema::topology(&pane.view, &pane.machines),
-        (schema::TAB_ROWS, _) | _ => schema::rows_view(&pane.view, &pane.rows_report),
+fn schema_for(pane: &PaneState) -> Value {
+    match pane.view.mode.as_str() {
+        schema::MODE_DASH => schema::dash_view(&pane.view, &pane.rows_report),
+        schema::MODE_TOP | _ => schema::top_view(&pane.view, &pane.machines),
     }
 }
 
@@ -180,131 +129,83 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
             let pane = state.lock().unwrap();
             respond(stream, 200, &json!({
                 "ok": true,
-                "app_name": "Yggtopo",
+                "app_name": "Ytop",
                 "document_version": pane.stamp.to_string(),
             }));
         }
-        // Both panes render the same view. One app, one state: the rail and the
-        // viewport showing different tabs would be two sources of truth about
-        // what the user is looking at.
-        ("GET", "/pane/topo") => {
+        ("GET", "/pane/topo") | ("GET", "/pane/rail") => {
             let pane = state.lock().unwrap();
-            respond(stream, 200, &schema_for(&pane, true));
-        }
-        ("GET", "/pane/rail") => {
-            let pane = state.lock().unwrap();
-            respond(stream, 200, &schema_for(&pane, false));
+            respond(stream, 200, &schema_for(&pane));
         }
         ("POST", "/action") => {
-            let reply = handle_action(state, &body);
-            respond(stream, 200, &reply);
-        }
-        _ => respond(stream, 404, &json!({})),
-    }
-}
+            let action = body["action"].as_str().unwrap_or("");
+            let value = body["value"].as_str().unwrap_or("");
+            let mut pane = state.lock().unwrap();
 
-/// The widget's own value rides `values.value`; a field may also arrive under
-/// its widget id. Read both, prefer the explicit one.
-fn posted_value(values: &Value, id: &str) -> String {
-    values
-        .get("value")
-        .and_then(Value::as_str)
-        .or_else(|| values.get(id).and_then(Value::as_str))
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn handle_action(state: &Mutex<PaneState>, body: &Value) -> Value {
-    let action = body["action"].as_str().unwrap_or_default().to_string();
-    let values = body["values"].clone();
-
-    // ⛔ THE WRITE VERBS RUN OUTSIDE THE LOCK. `disarm` on a remote host is an
-    //    ssh round trip; doing it under the pane mutex would freeze the pane
-    //    for its duration, and a surface that stops repainting the instant you
-    //    press its button is indistinguishable from one that crashed.
-    let outcome: Option<String> = if let Some(rest) = action.strip_prefix("armed:") {
-        let host = rest.to_string();
-        let target = (host != fleet::LOCAL).then_some(host.as_str());
-        // The toggle posts the state it is moving TO.
-        let want_armed = matches!(
-            posted_value(&values, &action).to_ascii_lowercase().as_str(),
-            "true" | "1" | "on" | "yes"
-        );
-        let reply = if want_armed {
-            booter::arm(target, PROBE_TIMEOUT)
-        } else {
-            booter::disarm(
-                target,
-                Some(4.0),
-                "disarmed from yggtopo",
-                PROBE_TIMEOUT,
-            )
-        };
-        Some(summarise(
-            &reply,
-            &if want_armed {
-                format!("{host}: booter armed")
-            } else {
-                format!("{host}: booter disarmed for 4h — subscriptions kept, and it re-arms itself")
-            },
-        ))
-    } else if let Some(rest) = action.strip_prefix("defer:") {
-        let (host, uuid) = rest.split_once(':').unwrap_or((rest, ""));
-        let target = (host != fleet::LOCAL).then_some(host);
-        let reply = booter::defer(target, uuid, 1800, PROBE_TIMEOUT);
-        Some(summarise(&reply, &format!("{}: boot window widened", &uuid[..8.min(uuid.len())])))
-    } else if let Some(rest) = action.strip_prefix("unsub:") {
-        let (host, uuid) = rest.split_once(':').unwrap_or((rest, ""));
-        let target = (host != fleet::LOCAL).then_some(host);
-        let reply = booter::unsubscribe(target, uuid, PROBE_TIMEOUT);
-        // ⛔ A MONITOR'S REFUSAL IS THE ANSWER, NOT AN ERROR. The booter declines
-        //    to unsubscribe a watch without `--force`, deliberately; showing that
-        //    sentence is the whole point of the refusal existing.
-        Some(summarise(&reply, &format!("{}: no longer watched", &uuid[..8.min(uuid.len())])))
-    } else {
-        None
-    };
-
-    let mut pane = state.lock().unwrap();
-    match action.as_str() {
-        "tab" => {
-            let tab = posted_value(&values, "tab");
-            if tab == schema::TAB_BOOTER || tab == schema::TAB_TOPOLOGY {
-                pane.view.tab = tab;
-                pane.view.notice = None;
+            if action == "mode" {
+                pane.view.mode = value.to_string();
+                pane.touch();
+            } else if action == "tab" {
+                pane.view.dash_tab = value.to_string();
+                pane.touch();
+            } else if action == "select_host" {
+                pane.view.selected_host = value.to_string();
+                pane.touch();
+            } else if action == "filter" {
+                pane.view.filter = value.to_string();
+                pane.touch();
+            } else if let Some(cont) = action.strip_prefix("toggle_container:") {
+                let cont_name = cont.to_string();
+                if let Some(pos) = pane.view.expanded_containers.iter().position(|c| c == &cont_name) {
+                    pane.view.expanded_containers.remove(pos);
+                } else {
+                    pane.view.expanded_containers.push(cont_name);
+                }
+                pane.touch();
+            } else if action == "add_machine_prompt" {
+                pane.view.adding_machine = true;
+                pane.touch();
+            } else if action == "add_machine_cancel" {
+                pane.view.adding_machine = false;
+                pane.touch();
+            } else if action == "add_machine_save" {
+                let alias = body.get("values").and_then(|v| v.get("new_machine_alias")).and_then(Value::as_str).unwrap_or("");
+                let label = body.get("values").and_then(|v| v.get("new_machine_label")).and_then(Value::as_str).unwrap_or("");
+                let is_ygg = body.get("values").and_then(|v| v.get("new_machine_yggdrasil")).and_then(Value::as_bool).unwrap_or(false);
+                if !alias.is_empty() {
+                    let _ = fleet::add_machine_to_config(alias, label, is_ygg);
+                    pane.view.notice = Some(format!("✅ Added machine: {alias}"));
+                }
+                pane.view.adding_machine = false;
+                pane.touch();
+            } else if action == "clean_jankbox" {
+                match rows::clean_jankbox_on_dev() {
+                    Ok(killed) => {
+                        pane.view.notice = Some(format!("🧹 Cleaned {killed} leaked/twin processes!"));
+                    }
+                    Err(e) => {
+                        pane.view.notice = Some(format!("⛔ Clean failed: {e}"));
+                    }
+                }
+                pane.touch();
+            } else if action == "quota_hold" {
+                let _ = booter::set_rate_limit_hold(None, "indefinite", "manual hold from ytop");
+                pane.view.notice = Some("⏸ Quota hold activated".to_string());
+                pane.touch();
+            } else if action == "quota_release" {
+                let _ = booter::release_rate_limit_hold(None);
+                pane.view.notice = Some("▶ Quota hold released".to_string());
+                pane.touch();
+            } else if action == "refresh" {
+                pane.touch();
             }
-        }
-        "filter" => pane.view.filter = posted_value(&values, "filter"),
-        "refresh" => pane.view.notice = None,
-        _ => {}
-    }
-    if let Some(text) = outcome {
-        pane.view.notice = Some(text);
-    }
-    pane.touch();
-    // Answer with the schema of the pane that POSTED, so a click repaints
-    // without waiting for the next stamp poll.
-    // ⚠ The reply is the RAIL's shape: it is the pane whose widgets are
-    //   pressable, so it is the pane a POST comes from. A viewport press lands
-    //   in the top bar, whose chrome is identical in both.
-    schema_for(&pane, false)
-}
 
-/// Say what actually happened, in the verb's own words when it had any.
-fn summarise(reply: &Value, on_success: &str) -> String {
-    if let Some(message) = reply.get("message").and_then(Value::as_str) {
-        if !message.trim().is_empty() {
-            // The booter's verbs narrate themselves; the last line is the verdict.
-            let last = message.lines().last().unwrap_or(message).trim();
-            if !last.is_empty() {
-                return last.to_string();
-            }
+            respond(stream, 200, &json!({"ok": true}));
+        }
+        _ => {
+            respond(stream, 404, &json!({"error": "not found"}));
         }
     }
-    if let Some(error) = reply.get("error").and_then(Value::as_str) {
-        return format!("⛔ {error}");
-    }
-    on_success.to_string()
 }
 
 fn respond(mut stream: TcpStream, status: u16, body: &Value) {
@@ -319,19 +220,15 @@ fn respond(mut stream: TcpStream, status: u16, body: &Value) {
     let _ = stream.flush();
 }
 
-/// One reading, printed. The app is a useful CLI outside yggterm too, and that
-/// is also how its data is checked without a GUI in the loop.
-/// One reading, printed. The app is a useful CLI outside yggterm too, and that
-/// is also how its data is checked without a GUI in the loop.
-pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
-    if tab == schema::TAB_ROWS {
+pub fn print_once(mode: &str, as_json: bool) -> Result<()> {
+    if mode == schema::MODE_DASH {
         let report = rows::scan_all_hosts();
         if as_json {
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
         println!("==========================================================================================================");
-        println!("  Y T O P   —   F L E E T   A G E N T   R O W S   B I R D S - E Y E   V I E W");
+        println!("  Y T O P   ·   F L E E T   A G E N T   R O W S   &   J A N K B O X   D A S H B O A R D");
         println!("==========================================================================================================");
         if let Some(hold) = &report.quota_hold {
             println!("  ⏸ QUOTA HOLD ACTIVE: {hold}\n");
@@ -360,11 +257,14 @@ pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
                 r.seat, r.role, r.campaign, short_u, proc_str, t_str, r.supervision_state);
         }
         println!("  {}", "=".repeat(110));
-        println!("  Total Seats: {}  ·  Live: {}  ·  Twin Duplicate Alarms: {}  ·  Leaked Subshells: {}  ·  Context: {:.1} MB",
-            report.total_rows, report.live_count, report.twin_count, report.leak_count, report.total_transcript_mb);
+        println!("  Total Seats: {}  ·  Live: {}  ·  Agent CPU: {:.1}%  ·  Agent RAM: {:.1} MB  ·  Context: {:.1} MB",
+            report.total_rows, report.live_count, report.total_agent_cpu_pct, report.total_agent_rss_mb, report.total_transcript_mb);
+        println!("  Jankbox Leaks: {} spinning subshells  ·  Twin Duplicate Alarms: {}",
+            report.leak_count, report.twin_count);
         return Ok(());
     }
 
+    // Default: TOP mode
     let hosts = fleet::roster();
     let readings = fleet::read_all(&hosts, PROBE_TIMEOUT);
     let machines = fleet::group(readings);
@@ -374,8 +274,7 @@ pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
             "machines": machines.iter().map(|m| json!({
                 "key": m.key,
                 "reachable": m.reachable(),
-                "hosts": m.readings.iter()
-                    .map(|r| r["host"].clone()).collect::<Vec<_>>(),
+                "hosts": m.readings.iter().map(|r| r["host"].clone()).collect::<Vec<_>>(),
                 "readings": m.readings,
             })).collect::<Vec<_>>(),
         }));
@@ -392,7 +291,7 @@ pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
             continue;
         }
         println!(
-            "\n{} · {} × {} · kernel {}",
+            "\n🖥️  {} · {} × {} · kernel {}",
             principal["hostname"].as_str().unwrap_or("?"),
             principal["cpu_count"].as_i64().unwrap_or(0),
             principal["cpu_model"].as_str().unwrap_or("?"),
@@ -407,13 +306,43 @@ pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
                 reading["virt"].as_str().unwrap_or("?"),
             );
         }
-        for container in principal["containers"].as_array().cloned().unwrap_or_default() {
-            println!(
-                "  ├─ 📦 {:<12} {}",
-                container["name"].as_str().unwrap_or("?"),
-                container["state"].as_str().unwrap_or("?"),
-            );
+
+        // ZFS Pool info if available
+        let zfs = &principal["zfs"];
+        if zfs["has_zfs"].as_bool().unwrap_or(false) {
+            for pool in zfs["pools"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "  ├─ 💾 zpool: {:<8} [{}] · {} alloc / {} total (frag {}%)",
+                    pool["name"].as_str().unwrap_or("?"),
+                    pool["health"].as_str().unwrap_or("?"),
+                    schema::bytes_to_human(pool["alloc_bytes"].as_i64().unwrap_or(0)),
+                    schema::bytes_to_human(pool["size_bytes"].as_i64().unwrap_or(0)),
+                    pool["frag_pct"].as_i64().unwrap_or(0),
+                );
+            }
         }
+
+        // LXC Containers with process details
+        for container in principal["containers"].as_array().cloned().unwrap_or_default() {
+            let c_name = container["name"].as_str().unwrap_or("?");
+            let c_state = container["state"].as_str().unwrap_or("?");
+            let c_cpu = container["cpu_busy_pct"].as_f64().unwrap_or(0.0);
+            let c_rss = container["mem_rss_kb"].as_i64().unwrap_or(0);
+            println!(
+                "  ├─ 📦 {:<12} [{}] · {:>5.1}% cpu  {:>8} ram",
+                c_name, c_state, c_cpu, schema::mb(c_rss)
+            );
+            for p in container["top_procs"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "  │   └─ PID {:<7} {:>5.1}% cpu  {:>8}   {}",
+                    p["pid"].as_i64().unwrap_or(0),
+                    p["cpu_pct"].as_f64().unwrap_or(0.0),
+                    schema::mb(p["rss_kb"].as_i64().unwrap_or(0)),
+                    p["comm"].as_str().unwrap_or("?")
+                );
+            }
+        }
+
         for p in principal["top"].as_array().cloned().unwrap_or_default().iter().take(5) {
             println!(
                 "     {:>6.1}%  {:>8} KB  {}",
@@ -426,7 +355,6 @@ pub fn print_once(tab: &str, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Where a reading came from, for the `--probe` self-check.
 pub fn probe_once(host: Option<&str>) -> Result<()> {
     println!("{}", probe::read_host(host, PROBE_TIMEOUT));
     Ok(())

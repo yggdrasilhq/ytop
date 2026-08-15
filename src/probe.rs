@@ -39,7 +39,7 @@ const CPU_SAMPLE_MS: u64 = 400;
 const TOP_N: usize = 12;
 
 const PROBE: &str = r#"
-import json, os, time, subprocess
+import json, os, time, subprocess, re
 
 SAMPLE_MS = int(os.environ.get("YGGTOPO_SAMPLE_MS", "400"))
 TOP_N = int(os.environ.get("YGGTOPO_TOP_N", "12"))
@@ -225,30 +225,106 @@ rows.sort(key=lambda r: -r[1])
 
 names = usernames()
 top = []
-for pid, pct in rows[:TOP_N]:
+container_procs = {}
+
+for pid, pct in rows:
     comm, cmd, rss_kb, uid = details(pid)
-    top.append({"pid": int(pid), "comm": comm, "cmd": cmd[:180],
-                "cpu_pct": round(pct, 1), "rss_kb": rss_kb,
-                "user": names.get(uid, str(uid))})
+    cgroup = read(f"/proc/{pid}/cgroup")
+    cont_name = None
+    m = re.search(r"/(?:lxc\.payload\.|lxc/|lxc@|docker/)([a-zA-Z0-9_-]+)", cgroup)
+    if m:
+        cont_name = m.group(1)
+    proc_entry = {
+        "pid": int(pid), "comm": comm, "cmd": cmd[:180],
+        "cpu_pct": round(pct, 1), "rss_kb": rss_kb,
+        "user": names.get(uid, str(uid)),
+        "container": cont_name,
+    }
+    if len(top) < TOP_N:
+        top.append(proc_entry)
+    if cont_name:
+        container_procs.setdefault(cont_name, []).append(proc_entry)
 
 mem = meminfo()
 guests, tool = containers()
+for g in guests:
+    c_name = g.get("name")
+    c_p = container_procs.get(c_name, [])
+    g["cpu_busy_pct"] = round(sum(p["cpu_pct"] for p in c_p), 1)
+    g["mem_rss_kb"] = sum(p["rss_kb"] for p in c_p)
+    g["procs_count"] = len(c_p)
+    g["top_procs"] = c_p[:6]
+
+# ZFS Check
+zfs_info = {"has_zfs": False, "pools": [], "iostat": None, "datasets": []}
+zp_bin, _ = which("zpool")
+if zp_bin:
+    try:
+        zp = subprocess.run([zp_bin, "list", "-Hp", "-o", "name,size,alloc,free,frag,cap,health"],
+                            capture_output=True, text=True, timeout=5)
+        if zp.returncode == 0:
+            zfs_info["has_zfs"] = True
+            for line in zp.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 7:
+                    zfs_info["pools"].append({
+                        "name": parts[0],
+                        "size_bytes": int(parts[1]),
+                        "alloc_bytes": int(parts[2]),
+                        "free_bytes": int(parts[3]),
+                        "frag_pct": int(parts[4].replace("%","").replace("-","0")),
+                        "cap_pct": int(parts[5].replace("%","")),
+                        "health": parts[6]
+                    })
+        io = subprocess.run([zp_bin, "iostat", "-p", "1", "2"],
+                            capture_output=True, text=True, timeout=5)
+        if io.returncode == 0:
+            lines = [l for l in io.stdout.strip().splitlines() if l and not l.startswith("---") and not l.startswith("capacity") and not l.startswith("pool")]
+            if lines:
+                last = lines[-1].split()
+                if len(last) >= 7:
+                    zfs_info["iostat"] = {
+                        "pool": last[0],
+                        "read_ops": int(last[3]),
+                        "write_ops": int(last[4]),
+                        "read_bytes_s": int(last[5]),
+                        "write_bytes_s": int(last[6])
+                    }
+    except Exception:
+        pass
+
+zfs_bin, _ = which("zfs")
+if zfs_bin and zfs_info["has_zfs"]:
+    try:
+        zf = subprocess.run([zfs_bin, "list", "-Hp", "-o", "name,used,avail,refer,mountpoint"],
+                            capture_output=True, text=True, timeout=5)
+        if zf.returncode == 0:
+            for line in zf.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 5:
+                    zfs_info["datasets"].append({
+                        "name": parts[0],
+                        "used_bytes": int(parts[1]),
+                        "avail_bytes": int(parts[2]),
+                        "refer_bytes": int(parts[3]),
+                        "mountpoint": parts[4]
+                    })
+    except Exception:
+        pass
+
 uptime = read("/proc/uptime").split()
 print(json.dumps({
     "ok": True,
     "hostname": os.uname().nodename,
     "kernel": os.uname().release,
     "arch": os.uname().machine,
-    # ⭐ btime is the kernel's own boot instant. Every container on one kernel
-    #    reports the SAME value, and lxcfs does not virtualise it — which makes
-    #    (kernel, btime, cpu, cores) a DERIVED identity for the physical
-    #    machine, needing no configuration to keep in step with reality.
     "btime": stat_field("btime"),
     "cpu_model": cpu_model(),
     "cpu_count": os.cpu_count() or 0,
     "virt": virt(),
     "containers": guests,
     "container_tool": tool,
+    "zfs": zfs_info,
     "uptime_s": float(uptime[0]) if uptime else 0.0,
     "load": [float(v) for v in read("/proc/loadavg").split()[:3]] or [0, 0, 0],
     "mem_total_kb": mem.get("MemTotal", 0),

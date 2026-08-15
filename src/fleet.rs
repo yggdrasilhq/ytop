@@ -85,19 +85,81 @@ fn machines_from_yggterm() -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MachineEntry {
+    pub alias: String,
+    pub label: String,
+    #[serde(default)]
+    pub is_yggdrasil: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct MachinesConfig {
+    pub machines: Vec<MachineEntry>,
+}
+
+pub fn machines_config_path() -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".yggterm").join("config").join("machines.json"))
+}
+
+pub fn machines_from_config() -> Vec<MachineEntry> {
+    let mut entries = Vec::new();
+    if let Some(path) = machines_config_path() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(cfg) = serde_json::from_str::<MachinesConfig>(&data) {
+                entries.extend(cfg.machines);
+            }
+        }
+    }
+    // Also include legacy ~/.yggtopo/hosts if present
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(text) = std::fs::read_to_string(home.join(".yggtopo").join("hosts")) {
+            for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+                if !entries.iter().any(|e| e.alias == l) {
+                    entries.push(MachineEntry {
+                        alias: l.to_string(),
+                        label: l.to_string(),
+                        is_yggdrasil: false,
+                    });
+                }
+            }
+        }
+    }
+    entries
+}
+
+pub fn add_machine_to_config(alias: &str, label: &str, is_yggdrasil: bool) -> anyhow::Result<()> {
+    let path = machines_config_path().ok_or_else(|| anyhow::anyhow!("no home dir"))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut cfg = MachinesConfig::default();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(existing) = serde_json::from_str::<MachinesConfig>(&data) {
+            cfg = existing;
+        }
+    }
+    let alias_trim = alias.trim();
+    if alias_trim.is_empty() {
+        return Ok(());
+    }
+    if let Some(existing) = cfg.machines.iter_mut().find(|m| m.alias == alias_trim) {
+        existing.label = label.trim().to_string();
+        existing.is_yggdrasil = is_yggdrasil;
+    } else {
+        cfg.machines.push(MachineEntry {
+            alias: alias_trim.to_string(),
+            label: if label.trim().is_empty() { alias_trim.to_string() } else { label.trim().to_string() },
+            is_yggdrasil,
+        });
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg)?)?;
+    Ok(())
+}
+
 fn machines_from_operator() -> Vec<String> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    std::fs::read_to_string(home.join(".yggtopo").join("hosts"))
-        .map(|text| {
-            text.lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    machines_from_config().into_iter().map(|m| m.alias).collect()
 }
 
 /// Every machine to read, local first, each named once.
