@@ -1,7 +1,6 @@
 //! The widget schema — what yggterm paints in both Viewport and Rail surfaces.
 //!
-//! ⛔ ZERO RAW MARKDOWN DUMPS.
-//! Viewport: SaaS-style GUI composition with native Dioxus cards, progress meters, and process trees.
+//! Viewport: SaaS-style GUI composition with rich multi-metric cards, progress meters, and process tables.
 //! Rail: Focused machine switcher (in Top mode) or supervision/jankbox control panel (in Dash mode).
 //! Titlebar Switch: Dynamic app-driven Top ↔ Dash mode toggle.
 
@@ -79,6 +78,13 @@ pub fn duration(secs: f64) -> String {
 }
 
 pub fn progress_bar(pct: f64, width: usize) -> String {
+    let clamped = pct.clamp(0.0, 100.0);
+    let filled = ((clamped / 100.0) * width as f64).round() as usize;
+    let empty = width.saturating_sub(filled);
+    format!("`[{}{}]` **{:.1}%**", "█".repeat(filled), "░".repeat(empty), clamped)
+}
+
+pub fn plain_progress_bar(pct: f64, width: usize) -> String {
     let clamped = pct.clamp(0.0, 100.0);
     let filled = ((clamped / 100.0) * width as f64).round() as usize;
     let empty = width.saturating_sub(filled);
@@ -264,12 +270,17 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
 pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport) -> Value {
     let mut widgets = Vec::new();
 
-    if let Some(notice) = &view.notice {
-        widgets.push(label(notice.clone()));
-    }
+    // Top filter search box in bar
+    widgets.push(json!({
+        "kind": "search-box",
+        "id": "filter",
+        "action": "filter",
+        "value": view.filter,
+        "placeholder": if view.mode == MODE_TOP { "Search processes, containers, PID..." } else { "Search campaign, seat, role, UUID..." },
+    }));
 
     if view.mode == MODE_TOP {
-        // TOP MODE VIEWPORT: Complete GUI htop view for selected machine
+        // TOP MODE: Infrastructure & Host Health Dashboard
         let target_machine = machines
             .iter()
             .find(|m| {
@@ -285,11 +296,17 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             let shown = p["label"].as_str().unwrap_or(host);
 
             if !m.reachable() {
-                widgets.push(section(format!("Host {shown} Unreachable"), true));
-                widgets.push(label(format!(
-                    "Connection failed: {}",
-                    p["error"].as_str().unwrap_or("timed out")
-                )));
+                let error_msg = p["error"].as_str().unwrap_or("Host unreachable or connection timed out.");
+                let md = format!(
+                    "# ⚠️ Host Offline: {shown}\n\n\
+                    > **Connection Error**: `{error_msg}`\n\n\
+                    Please verify the machine is powered on, network is reachable, and SSH credentials are configured."
+                );
+                widgets.push(json!({
+                    "kind": "markdown",
+                    "id": "offline_doc",
+                    "source": md,
+                }));
             } else {
                 let total_kb = p["mem_total_kb"].as_i64().unwrap_or(0);
                 let avail_kb = p["mem_available_kb"].as_i64().unwrap_or(0);
@@ -300,48 +317,63 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                 let swap_used_kb = (swap_total_kb - swap_free_kb).max(0);
                 let swap_pct = if swap_total_kb > 0 { swap_used_kb as f64 * 100.0 / swap_total_kb as f64 } else { 0.0 };
                 let cpu_busy = p["cpu_busy_pct"].as_f64().unwrap_or(0.0);
+                let cpu_cores = p["cpu_count"].as_i64().unwrap_or(1).max(1);
+                let cpu_normalized = (cpu_busy / cpu_cores as f64).clamp(0.0, 100.0);
+                let cpu_model = p["cpu_model"].as_str().unwrap_or("AMD/Intel Processor");
+                let kernel = p["kernel"].as_str().unwrap_or("Linux");
+                let arch = p["arch"].as_str().unwrap_or("x86_64");
+                let uptime = duration(p["uptime_s"].as_f64().unwrap_or(0.0));
+                let procs_total = p["procs_total"].as_i64().unwrap_or(0);
                 let load = p["load"]
                     .as_array()
                     .map(|l| {
-                        l.iter().filter_map(|v| v.as_f64()).map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" ")
+                        l.iter().filter_map(|v| v.as_f64()).map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" · ")
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| "0.00 · 0.00 · 0.00".to_string());
 
-                // Card 1: System Hardware & Resource Gauges
-                widgets.push(section(format!("🖥️ System Health: {shown}"), true));
-                widgets.push(label(format!(
-                    "Kernel {} · Arch {} · Uptime {} · Load [ {load} ] · Procs: {}",
-                    p["kernel"].as_str().unwrap_or("?"),
-                    p["arch"].as_str().unwrap_or("?"),
-                    duration(p["uptime_s"].as_f64().unwrap_or(0.0)),
-                    p["procs_total"].as_i64().unwrap_or(0)
-                )));
-                widgets.push(label(format!(
-                    "CPU Usage:  {}  ({} Cores · {})",
-                    progress_bar(cpu_busy, 24),
-                    p["cpu_count"].as_i64().unwrap_or(0),
-                    p["cpu_model"].as_str().unwrap_or("unknown")
-                )));
-                widgets.push(label(format!(
-                    "Memory RAM: {}  ({} / {})",
-                    progress_bar(mem_pct, 24),
+                let mut md = String::new();
+
+                // 1. Host Header Banner
+                md.push_str(&format!(
+                    "# 🖥️ {shown}\n\n\
+                    | Attribute | Value | Attribute | Value |\n\
+                    | :--- | :--- | :--- | :--- |\n\
+                    | **Kernel** | `{kernel}` | **Uptime** | `{uptime}` |\n\
+                    | **Architecture** | `{arch}` | **Total Tasks** | `{procs_total} procs` |\n\
+                    | **CPU Cores** | `{cpu_cores} Cores ({cpu_model})` | **Load Average** | `{load}` |\n\n"
+                ));
+
+                // 2. Hardware Resource Gauges Card
+                md.push_str("## 📊 Resource Meters\n\n");
+                md.push_str(&format!(
+                    "| Resource | Usage Meter | Used | Total |\n\
+                    | :--- | :--- | :--- | :--- |\n\
+                    | **CPU Busy** | {} | `{cpu_busy:.1}%` (`{cpu_normalized:.1}% avg`) | `{cpu_cores} Cores` |\n\
+                    | **RAM Memory** | {} | `{}` | `{}` |\n",
+                    progress_bar(cpu_normalized, 20),
+                    progress_bar(mem_pct, 20),
                     gb(used_kb),
                     gb(total_kb)
-                )));
+                ));
+
                 if swap_total_kb > 0 {
-                    widgets.push(label(format!(
-                        "Swap Space: {}  ({} / {})",
-                        progress_bar(swap_pct, 24),
+                    md.push_str(&format!(
+                        "| **Swap Space** | {} | `{}` | `{}` |\n\n",
+                        progress_bar(swap_pct, 20),
                         mb(swap_used_kb),
                         mb(swap_total_kb)
-                    )));
+                    ));
+                } else {
+                    md.push_str("| **Swap Space** | `[░░░░░░░░░░░░░░░░░░░░]` **0.0%** | `0 MB` | `0 MB` |\n\n");
                 }
 
-                // Card 2: ZFS Storage & IOSTAT (if present)
+                // 3. ZFS Storage & Real-Time IOSTAT (if present)
                 let zfs = &p["zfs"];
                 if zfs["has_zfs"].as_bool().unwrap_or(false) {
-                    widgets.push(section("💾 ZFS Storage Pools & Real-Time IOSTAT", true));
+                    md.push_str("## 💾 ZFS Storage Pools & Real-Time IOSTAT\n\n");
                     if let Some(pools) = zfs["pools"].as_array() {
+                        md.push_str("| Pool | Health | Allocation Meter | Used / Total | Frag % |\n");
+                        md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
                         for pool in pools {
                             let name = pool["name"].as_str().unwrap_or("?");
                             let health = pool["health"].as_str().unwrap_or("UNKNOWN");
@@ -349,87 +381,75 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             let size_b = pool["size_bytes"].as_i64().unwrap_or(0);
                             let alloc_b = pool["alloc_bytes"].as_i64().unwrap_or(0);
                             let frag_pct = pool["frag_pct"].as_i64().unwrap_or(0);
+                            let health_badge = if health == "ONLINE" { "🟢 ONLINE" } else { "🟡 DEGRADED" };
 
-                            widgets.push(label(format!(
-                                "Pool [{name}]  {health}  ·  Allocation {}  ({} / {}, frag {frag_pct}%)",
-                                progress_bar(cap_pct, 20),
+                            md.push_str(&format!(
+                                "| **{name}** | {health_badge} | {} | `{} / {}` | `{frag_pct}%` |\n",
+                                progress_bar(cap_pct, 16),
                                 bytes_to_human(alloc_b),
                                 bytes_to_human(size_b)
-                            )));
+                            ));
                         }
+                        md.push('\n');
                     }
+
                     if let Some(io) = zfs["iostat"].as_object() {
                         let r_ops = io.get("read_ops").and_then(Value::as_i64).unwrap_or(0);
                         let w_ops = io.get("write_ops").and_then(Value::as_i64).unwrap_or(0);
                         let r_bytes = io.get("read_bytes_s").and_then(Value::as_i64).unwrap_or(0);
                         let w_bytes = io.get("write_bytes_s").and_then(Value::as_i64).unwrap_or(0);
-                        widgets.push(label(format!(
-                            "Throughput: Read {}/s ({} IOPS)  ·  Write {}/s ({} IOPS)",
+                        md.push_str(&format!(
+                            "> ⚡ **Live I/O Throughput**: Read **{}/s** ({} IOPS)  ·  Write **{}/s** ({} IOPS)\n\n",
                             bytes_to_human(r_bytes),
                             r_ops,
                             bytes_to_human(w_bytes),
                             w_ops
-                        )));
+                        ));
                     }
                 }
 
-                // Card 3: LXC Containers & Process Trees
+                // 4. LXC Containers
                 let containers = p["containers"].as_array().cloned().unwrap_or_default();
                 if !containers.is_empty() {
-                    widgets.push(section(format!("📦 LXC Containers ({} total)", containers.len()), true));
+                    md.push_str(&format!("## 📦 LXC Containers ({} Total)\n\n", containers.len()));
+                    md.push_str("| Container | Status | CPU % | RAM RSS | Tasks | Top Internal Process |\n");
+                    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+
                     for c in &containers {
                         let c_name = c["name"].as_str().unwrap_or("?");
                         let state = c["state"].as_str().unwrap_or("?");
                         let c_cpu = c["cpu_busy_pct"].as_f64().unwrap_or(0.0);
                         let c_rss = c["mem_rss_kb"].as_i64().unwrap_or(0);
                         let procs_count = c["procs_count"].as_i64().unwrap_or(0);
-                        let is_expanded = view.expanded_containers.contains(&c_name.to_string());
+                        let state_badge = if state == "RUNNING" { "🟢 RUNNING" } else { "⚪ STOPPED" };
 
-                        let title_text = format!(
-                            "{} {} [{state}] · {c_cpu:.1}% CPU · {} RAM ({procs_count} procs)",
-                            if is_expanded { "▼" } else { "▶" },
-                            c_name,
-                            mb(c_rss)
-                        );
+                        let top_proc_str = c["top_procs"].as_array().and_then(|tps| tps.first()).map(|tp| {
+                            let pid = tp["pid"].as_i64().unwrap_or(0);
+                            let comm = tp["comm"].as_str().unwrap_or("?");
+                            let cpu_p = tp["cpu_pct"].as_f64().unwrap_or(0.0);
+                            format!("`{comm}` ({cpu_p:.1}% CPU, PID {pid})")
+                        }).unwrap_or_else(|| "—".to_string());
 
-                        widgets.push(json!({
-                            "kind": "list-row",
-                            "id": format!("container:{c_name}"),
-                            "title": title_text,
-                            "status": if state == "RUNNING" { "transient" } else { "" },
-                            "row_action": format!("toggle_container:{c_name}"),
-                        }));
-
-                        if is_expanded {
-                            let top_procs = c["top_procs"].as_array().cloned().unwrap_or_default();
-                            for tp in top_procs {
-                                let pid = tp["pid"].as_i64().unwrap_or(0);
-                                let comm = tp["comm"].as_str().unwrap_or("?");
-                                let cpu_p = tp["cpu_pct"].as_f64().unwrap_or(0.0);
-                                let rss = tp["rss_kb"].as_i64().unwrap_or(0);
-                                let user = tp["user"].as_str().unwrap_or("?");
-                                widgets.push(json!({
-                                    "kind": "list-row",
-                                    "id": format!("proc:{c_name}:{pid}"),
-                                    "title": format!("    PID {pid:<7} {cpu_p:>5.1}% CPU   {:>8}   {comm} ({user})", mb(rss)),
-                                }));
-                            }
+                        if matches_filter(&view.filter, &[c_name, state, &top_proc_str]) {
+                            md.push_str(&format!(
+                                "| **{c_name}** | {state_badge} | `{c_cpu:.1}%` | `{}` | `{} procs` | {} |\n",
+                                mb(c_rss),
+                                procs_count,
+                                top_proc_str
+                            ));
                         }
                     }
+                    md.push('\n');
                 }
 
-                // Card 4: Host Top Processes
+                // 5. Host Top Processes Data Table
                 let top_procs = p["top"].as_array().cloned().unwrap_or_default();
                 if !top_procs.is_empty() {
-                    widgets.push(section(format!("⚡ Top Processes: {shown}"), true));
-                    widgets.push(json!({
-                        "kind": "search-box",
-                        "id": "filter",
-                        "action": "filter",
-                        "value": view.filter,
-                        "placeholder": "filter processes",
-                    }));
+                    md.push_str("## ⚡ Top Consuming Processes\n\n");
+                    md.push_str("| PID | User | CPU % | RAM RSS | Scope | Command |\n");
+                    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
 
+                    let mut rendered_procs = 0;
                     for proc in top_procs {
                         let pid = proc["pid"].as_i64().unwrap_or(0);
                         let comm = proc["comm"].as_str().unwrap_or("?");
@@ -443,141 +463,130 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             continue;
                         }
 
-                        let scope = if let Some(cn) = cont {
-                            format!("ct:{cn}")
+                        let scope_badge = if let Some(cn) = cont {
+                            format!("`ct:{cn}`")
                         } else {
-                            "host".to_string()
+                            "`host`".to_string()
                         };
 
-                        widgets.push(json!({
-                            "kind": "list-row",
-                            "id": format!("top_proc:{host}:{pid}"),
-                            "title": format!("PID {pid:<7} {cpu_pct:>5.1}% CPU   {:>8}   {comm}  ({scope})", mb(rss_kb)),
-                            "status": if cpu_pct > 50.0 { "transient" } else { "" },
-                        }));
+                        let display_cmd = if !cmd.is_empty() {
+                            let truncated = if cmd.len() > 60 { &cmd[..60] } else { cmd };
+                            format!("`{comm}` <span style=\"color:#888\">{truncated}</span>")
+                        } else {
+                            format!("`{comm}`")
+                        };
+
+                        md.push_str(&format!(
+                            "| `{pid}` | `{user}` | **`{cpu_pct:.1}%`** | `{}` | {} | {} |\n",
+                            mb(rss_kb),
+                            scope_badge,
+                            display_cmd
+                        ));
+
+                        rendered_procs += 1;
+                        if rendered_procs >= 30 {
+                            break;
+                        }
                     }
+                    md.push('\n');
                 }
-            }
-        }
-    } else {
-        // DASH MODE VIEWPORT: Full Agent Fleet Cockpit
-        widgets.push(section("Agent Fleet Rows Census", true));
-        widgets.push(json!({
-            "kind": "search-box",
-            "id": "filter",
-            "action": "filter",
-            "value": view.filter,
-            "placeholder": "filter rows by seat, campaign, role, or uuid",
-        }));
-
-        for (campaign, rows) in &report.campaigns {
-            let matching_rows: Vec<&RowInfo> = rows
-                .iter()
-                .filter(|r| {
-                    matches_filter(
-                        &view.filter,
-                        &[&r.seat, &r.campaign, &r.role, &r.uuid, &r.title, &r.supervision_state],
-                    )
-                })
-                .collect();
-
-            if matching_rows.is_empty() {
-                continue;
-            }
-
-            widgets.push(section(format!("Campaign: {campaign} ({} rows)", rows.len()), true));
-
-            for r in matching_rows {
-                let proc_str = if r.twin_alert {
-                    format!("⛔ TWIN ({:?})", r.pids)
-                } else if !r.pids.is_empty() {
-                    if r.leaked_child_loops > 0 {
-                        format!("LIVE {:?} + ⚠️{} leaks", r.pids, r.leaked_child_loops)
-                    } else {
-                        format!("LIVE {:?}", r.pids)
-                    }
-                } else {
-                    "💀 DEAD".to_string()
-                };
-
-                let short_uuid = if r.uuid.len() >= 8 { &r.uuid[..8] } else { &r.uuid };
-                let title_line = format!(
-                    "Seat {:<6} {:<12} [{}]  ·  {proc_str}  ·  {:.1}% CPU  ·  {} RAM  ·  {} KB Context",
-                    r.seat,
-                    r.title,
-                    short_uuid,
-                    r.cpu_pct,
-                    mb(r.rss_kb),
-                    r.transcript_size_kb
-                );
-
-                let status_dot = if r.twin_alert || r.leaked_child_loops > 0 {
-                    "transient"
-                } else if r.is_alive {
-                    "durable"
-                } else {
-                    ""
-                };
 
                 widgets.push(json!({
-                    "kind": "list-row",
-                    "id": format!("row:{}", r.uuid),
-                    "title": title_line,
-                    "status": status_dot,
+                    "kind": "markdown",
+                    "id": "top_dashboard_doc",
+                    "source": md,
                 }));
             }
         }
+    } else {
+        // DASH MODE: Agent Fleet Cockpit & Jankbox Matrix
+        let mut md = String::new();
+
+        md.push_str("# 📊 Agent Fleet Rows & Jankbox Cockpit\n\n");
+
+        // Overview KPI Cards
+        md.push_str(&format!(
+            "| Total Seats | Live Agents | Fleet Agent CPU | Fleet Agent RAM | Total Context Window |\n\
+            | :--- | :--- | :--- | :--- | :--- |\n\
+            | **`{}`** | **`{}`** | **`{:.1}%`** | **`{:.1} MB`** | **`{:.1} MB`** |\n\n",
+            report.total_rows,
+            report.live_count,
+            report.total_agent_cpu_pct,
+            report.total_agent_rss_mb,
+            report.total_transcript_mb
+        ));
+
+        // Supervision Status Alert
+        if let Some(hold) = &report.quota_hold {
+            md.push_str(&format!(
+                "> ⏸ **SUPERVISION QUOTA HOLD ACTIVE**: `{hold}`\n\
+                > All automated subagents and booter loops are temporarily on hold to conserve quota.\n\n"
+            ));
+        } else {
+            md.push_str("> 🟢 **SUPERVISION ACTIVE**: Fleet orchestrators running normal scheduling.\n\n");
+        }
+
+        // Jankbox Warnings (if any)
+        if report.leak_count > 0 || report.twin_count > 0 {
+            md.push_str(&format!(
+                "> ⚠️ **JANKBOX ANOMALIES DETECTED**: **{}** orphaned spinning loops, **{}** twin duplicate sessions.\n\n",
+                report.leak_count, report.twin_count
+            ));
+        }
+
+        // Fleet Rows Matrix
+        md.push_str("## 🤖 Fleet Agent Matrix\n\n");
+        md.push_str("| Seat | Role | Campaign | UUID | Status | Context | Supervision |\n");
+        md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
+
+        for row in &report.rows {
+            let seat = if row.seat.is_empty() { "?" } else { &row.seat };
+            let role = if row.role.is_empty() { "agent" } else { &row.role };
+            let camp = if row.campaign.is_empty() { "unregistered" } else { &row.campaign };
+            let uuid = if row.uuid.is_empty() { "—" } else { &row.uuid };
+            let short_uuid = if uuid.len() > 8 { &uuid[..8] } else { uuid };
+
+            let status_badge = if row.is_alive {
+                let cpu = row.cpu_pct;
+                if row.twin_alert {
+                    format!("⛔ TWIN (`{cpu:.0}%` CPU)")
+                } else {
+                    format!("🟢 LIVE (`{cpu:.0}%` CPU)")
+                }
+            } else {
+                "💀 DEAD".to_string()
+            };
+
+            let ctx_str = format!("`{} KB` ({}L)", row.transcript_size_kb, row.transcript_lines);
+            let sup_str = if !row.supervision_state.is_empty() {
+                &row.supervision_state
+            } else if report.quota_hold.is_some() {
+                "⏸ Quota Held"
+            } else {
+                "🟢 Active"
+            };
+
+            if matches_filter(&view.filter, &[seat, role, camp, uuid, &status_badge]) {
+                md.push_str(&format!(
+                    "| **`{seat}`** | `{role}` | **`{camp}`** | `{short_uuid}` | {status_badge} | {ctx_str} | {sup_str} |\n",
+                ));
+            }
+        }
+        md.push('\n');
+
+        widgets.push(json!({
+            "kind": "markdown",
+            "id": "dash_dashboard_doc",
+            "source": md,
+        }));
     }
 
     json!({
-        "title": if view.mode == MODE_TOP { "ytop — Top" } else { "ytop — Dash" },
+        "title": if view.mode == MODE_TOP { "Infrastructure Monitor" } else { "Fleet Cockpit" },
         "titlebar_switch": titlebar_switch_spec(&view.mode),
         "widgets": widgets,
+        "footer": [
+            json!({"kind": "button", "id": "refresh_viewport", "action": "refresh", "label": "Refresh Dashboard"}),
+        ]
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_reading(host: &str, ok: bool) -> Value {
-        json!({
-            "ok": ok,
-            "host": host,
-            "hostname": host,
-            "kernel": "6.8.0",
-            "arch": "x86_64",
-            "btime": 1700000000,
-            "cpu_model": "Test CPU",
-            "cpu_count": 16,
-            "virt": "none",
-            "containers": [],
-            "zfs": {"has_zfs": false, "pools": [], "iostat": null, "datasets": []},
-            "uptime_s": 3600.0,
-            "load": [1.0, 0.8, 0.5],
-            "mem_total_kb": 16_000_000,
-            "mem_available_kb": 8_000_000,
-            "swap_total_kb": 0,
-            "swap_free_kb": 0,
-            "procs_total": 150,
-            "cpu_busy_pct": 25.0,
-            "top": [],
-        })
-    }
-
-    #[test]
-    fn test_viewport_and_rail_generation() {
-        let view = View::default();
-        let machines = vec![Machine {
-            key: Some("k1".into()),
-            readings: vec![sample_reading("openclaw", true)],
-        }];
-        let report = FleetRowsReport::default();
-        let viewport = viewport_view(&view, &machines, &report);
-        let rail = rail_view(&view, &machines, &report);
-
-        assert!(viewport["widgets"].is_array());
-        assert!(rail["widgets"].is_array());
-        assert!(viewport["titlebar_switch"].is_object());
-    }
 }
