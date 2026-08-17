@@ -610,18 +610,25 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                 by_row.entry(s.row.clone()).or_default().push(s);
             }
             md.push_str("### 📈 Last 60s — per-row spark (1s bucket, 5-min TTL)\n\n");
-            md.push_str("| Row | Samples | Avg CPU | Peak | Last RSS |\n");
-            md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
+            md.push_str("| Row | Samples | Avg CPU | Peak | Spark | Last RSS |\n");
+            md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
             for (row, samples) in by_row.iter().take(12) {
                 let avg = samples.iter().map(|s| s.cpu_pct as f64).sum::<f64>() / samples.len() as f64;
                 let peak = samples.iter().map(|s| s.cpu_pct as f64).fold(0.0, f64::max);
                 let last_rss = samples.last().map(|s| s.rss_kb).unwrap_or(0);
+                let spark: String = samples.iter().map(|s| {
+                    let p = s.cpu_pct.clamp(0.0, 100.0) as f64;
+                    match (p / 12.5) as usize {
+                        0 => '▁', 1 => '▂', 2 => '▃', 3 => '▄', 4 => '▅', 5 => '▆', 6 => '▇', _ => '█',
+                    }
+                }).collect();
                 md.push_str(&format!(
-                    "| `{}` | `{}` | ` {:.1}%` | ` {:.1}%` | `{}` |\n",
+                    "| `{}` | `{}` | ` {:.1}%` | ` {:.1}%` | `{} ` | `{}` |\n",
                     row,
                     samples.len(),
                     avg,
                     peak,
+                    spark,
                     mb(last_rss)
                 ));
             }

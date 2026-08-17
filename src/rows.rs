@@ -338,12 +338,156 @@ pub fn probe_rows(host: Option<&str>, timeout: Duration) -> Option<FleetRowsRepo
     })
 }
 
+fn probe_yggterm_fallback() -> Option<FleetRowsReport> {
+    // Live probe per diagnostics: server snapshot is the daemon ground truth
+    // (live_sessions with terminal_lines), not relay seat-membership.
+    // Used when relay is empty (jojo) but daemon holds 50+ Live Sessions.
+    fn yggterm_bin() -> String {
+        if let Ok(v) = std::env::var("YGGTERM_BIN") {
+            if !v.trim().is_empty() { return v; }
+        }
+        if let Some(home) = dirs::home_dir() {
+            let cand = home.join(".local/bin/yggterm-headless");
+            if cand.exists() { return cand.to_string_lossy().to_string(); }
+            let cand2 = home.join(".local/bin/yggterm");
+            if cand2.exists() { return cand2.to_string_lossy().to_string(); }
+        }
+        "yggterm-headless".to_string()
+    }
+    let output = Command::new(yggterm_bin())
+        .args(["server", "snapshot"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let val: Value = serde_json::from_slice(&output.stdout).ok()?;
+    let live = val.get("live_sessions")?.as_array()?;
+    if live.is_empty() {
+        return None;
+    }
+    // Also need descendant CPU/RSS via ps like the relay path
+    let ps_out = Command::new("ps")
+        .args(["-eo", "pid,ppid,pcpu,rss,args"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    let mut all_procs: std::collections::BTreeMap<i32, (f64, i64, String)> = std::collections::BTreeMap::new();
+    let mut procs_by_ppid: std::collections::BTreeMap<i32, Vec<i32>> = std::collections::BTreeMap::new();
+    for line in ps_out.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            if let (Ok(pid), Ok(ppid), Ok(pcpu), Ok(rss)) = (
+                parts[0].parse::<i32>(),
+                parts[1].parse::<i32>(),
+                parts[2].parse::<f64>(),
+                parts[3].parse::<i64>(),
+            ) {
+                let args = parts[4..].join(" ");
+                all_procs.insert(pid, (pcpu, rss, args));
+                procs_by_ppid.entry(ppid).or_default().push(pid);
+            }
+        }
+    }
+    fn descendants(pid: i32, by_ppid: &std::collections::BTreeMap<i32, Vec<i32>>, out: &mut std::collections::BTreeSet<i32>) {
+        out.insert(pid);
+        if let Some(children) = by_ppid.get(&pid) {
+            for &c in children {
+                descendants(c, by_ppid, out);
+            }
+        }
+    }
+    let mut rows: Vec<RowInfo> = Vec::new();
+    for sess in live {
+        let uuid = sess.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if uuid.is_empty() {
+            continue;
+        }
+        let title = sess.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let kind = sess.get("kind").and_then(|v| v.as_str()).unwrap_or("shell").to_string();
+        let host = sess.get("host_label").and_then(|v| v.as_str()).unwrap_or("local").to_string();
+        // Find pids matching uuid
+        let mut matching: Vec<i32> = Vec::new();
+        for (pid, (_, _, args)) in &all_procs {
+            if args.contains(&uuid) {
+                matching.push(*pid);
+            }
+        }
+        let mut all_desc = std::collections::BTreeSet::new();
+        for &p in &matching {
+            descendants(p, &procs_by_ppid, &mut all_desc);
+        }
+        let mut total_cpu = 0.0;
+        let mut total_rss = 0i64;
+        for d in &all_desc {
+            if let Some((pcpu, rss, _)) = all_procs.get(d) {
+                total_cpu += pcpu;
+                total_rss += rss;
+            }
+        }
+        let is_alive = true; // snapshot live_sessions are live by definition
+        // Seat: try outline_prefix from title? Fall back to short uuid
+        let seat = uuid.chars().take(8).collect::<String>();
+        rows.push(RowInfo {
+            seat,
+            role: kind.clone(),
+            campaign: "yggterm".to_string(),
+            uuid: uuid.clone(),
+            title: if title.is_empty() { format!("Session {}", &uuid[..8.min(uuid.len())]) } else { title },
+            host,
+            pids: matching,
+            cpu_pct: total_cpu,
+            rss_kb: total_rss,
+            twin_alert: false,
+            leaked_child_loops: 0,
+            transcript_size_kb: 0,
+            transcript_lines: 0,
+            last_active_mtime: "N/A".to_string(),
+            supervision_state: if is_alive { "Live".to_string() } else { "Dead".to_string() },
+            is_alive,
+        });
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+    let total_rows = rows.len();
+    let live_count = rows.iter().filter(|r| r.is_alive).count();
+    let total_cpu = rows.iter().map(|r| r.cpu_pct).sum();
+    let total_rss = rows.iter().map(|r| r.rss_kb as f64 / 1024.0).sum();
+    let mut campaigns: std::collections::BTreeMap<String, Vec<RowInfo>> = std::collections::BTreeMap::new();
+    for r in &rows {
+        campaigns.entry(r.campaign.clone()).or_default().push(r.clone());
+    }
+    Some(FleetRowsReport {
+        quota_hold: None,
+        rows,
+        total_rows,
+        live_count,
+        twin_count: 0,
+        leak_count: 0,
+        total_transcript_mb: 0.0,
+        total_agent_cpu_pct: total_cpu,
+        total_agent_rss_mb: total_rss,
+        jankbox: JankboxDiagnosis::default(),
+        campaigns,
+    })
+}
+
 pub fn scan_all_hosts() -> FleetRowsReport {
     let dev_report = probe_rows(Some("dev"), Duration::from_secs(12));
     if let Some(r) = dev_report {
-        return r;
+        if r.total_rows > 0 {
+            return r;
+        }
     }
-    probe_rows(None, Duration::from_secs(5)).unwrap_or_default()
+    if let Some(r) = probe_rows(None, Duration::from_secs(5)) {
+        if r.total_rows > 0 {
+            return r;
+        }
+    }
+    probe_yggterm_fallback().unwrap_or_default()
 }
 
 pub fn clean_jankbox_on_dev() -> anyhow::Result<usize> {
