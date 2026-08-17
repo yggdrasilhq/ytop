@@ -275,13 +275,27 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 let pages: Vec<crate::notebook::Page> = pages_raw.into_iter().filter_map(|pv| {
                     let title = pv.get("title").and_then(Value::as_str)?.to_string();
                     let markdown = pv.get("markdown").and_then(Value::as_str).unwrap_or("").to_string();
-                    serde_json::from_value::<crate::notebook::Page>(pv).ok().or(Some(crate::notebook::Page {
-                        id: format!("{}-{}", id, title.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")),
+                    if let Ok(page) = serde_json::from_value::<crate::notebook::Page>(pv.clone()) {
+                        return Some(page);
+                    }
+                    // Fallback when id/queries are caller-supplied without strict schema: preserve queries/chart.
+                    let ytrace_queries = pv
+                        .get("ytrace_queries")
+                        .and_then(|v| serde_json::from_value::<Vec<crate::notebook::YtraceQuery>>(v.clone()).ok())
+                        .unwrap_or_default();
+                    let chart = pv.get("chart").and_then(Value::as_str).map(|s| s.to_string());
+                    let page_id = pv
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("{}-{}", id, title.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")));
+                    Some(crate::notebook::Page {
+                        id: page_id,
                         title,
                         markdown,
-                        ytrace_queries: vec![],
-                        chart: None,
-                    }))
+                        ytrace_queries,
+                        chart,
+                    })
                 }).collect();
                 let nb = crate::notebook::Notebook {
                     id: id.clone(),

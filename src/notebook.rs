@@ -159,7 +159,10 @@ fn base_notebooks() -> Vec<Notebook> {
 }
 
 pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
-    let mut out = base_notebooks();
+    let mut out: Vec<Notebook> = base_notebooks()
+        .into_iter()
+        .filter(|nb| mode_filter.map_or(true, |f| nb.mode == f))
+        .collect();
     // + user-composed notebooks from disk
     let dir = notebook_dir();
     if let Ok(entries) = std::fs::read_dir(&dir) {
