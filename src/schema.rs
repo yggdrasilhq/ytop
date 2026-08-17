@@ -526,13 +526,73 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             md.push_str("> 🟢 **SUPERVISION ACTIVE**: Fleet orchestrators running normal scheduling.\n\n");
         }
 
-        // Jankbox Warnings (if any)
+        // Jankbox Warnings (if any) — interactive, not just a badge
         if report.leak_count > 0 || report.twin_count > 0 {
             md.push_str(&format!(
-                "> ⚠️ **JANKBOX ANOMALIES DETECTED**: **{}** orphaned spinning loops, **{}** twin duplicate sessions.\n\n",
+                "> ⚠️ **JANKBOX ANOMALIES DETECTED**: **{}** orphaned spinning loops, **{}** twin duplicate sessions.\n",
                 report.leak_count, report.twin_count
             ));
+            if !report.jankbox.leaked_subshell_pids.is_empty() {
+                md.push_str(&format!(
+                    "> Leaked: `{}`\n",
+                    report
+                        .jankbox
+                        .leaked_subshell_pids
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if !report.jankbox.twin_stale_pids.is_empty() {
+                md.push_str(&format!(
+                    "> Twins: `{}`\n",
+                    report
+                        .jankbox
+                        .twin_stale_pids
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if !report.jankbox.bloated_transcripts_mb.is_empty() {
+                md.push_str(&format!(
+                    "> Bloated: `{}`\n",
+                    report
+                        .jankbox
+                        .bloated_transcripts_mb
+                        .iter()
+                        .map(|(s, mb)| format!("{s} {mb:.1}MB"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            md.push_str("\n");
         }
+
+        // AXIOM-like Timeline (Slice 1: current CPU per row as meter strip; Slice 2 = time series ring)
+        md.push_str("## ⏱️ Timeline — AXIOM-lite (per-row CPU · RSS · log volume)\n\n");
+        md.push_str("> **Slice 1:** current `proc` delta (400ms `/proc/<pid>/stat` twice → htop-faithful) per live row. Slice 2 adds 5-min ring `t0 + (t,row,cpu,rss,log_events)` downsampled to 1s.\n\n");
+        md.push_str("| Row | CPU | RSS | Span |\n");
+        md.push_str("| :--- | :--- | :--- | :--- |\n");
+        for row in report.rows.iter().filter(|r| r.is_alive).take(12) {
+            let span = format!("{}·{}KB·{}L", row.cpu_pct, row.rss_kb, row.transcript_lines);
+            md.push_str(&format!(
+                "| `{}` | {} | `{}` | `{}` |\n",
+                row.seat,
+                progress_bar(row.cpu_pct.clamp(0.0, 100.0), 10),
+                mb(row.rss_kb),
+                span
+            ));
+        }
+        if report.rows.iter().filter(|r| r.is_alive).count() == 0 {
+            md.push_str("| — | `idle` | — | `no live rows` |\n");
+        }
+        md.push_str(&format!(
+            "\n> **Fleet rollup:** `total_cpu {:.1}%` · `total_rss {:.1} MB` · `{} live / {} total` — probe fan-out `1 ssh / host / 2s`, agent-first `server app do --session` without stealing your viewport.\n\n",
+            report.total_agent_cpu_pct, report.total_agent_rss_mb, report.live_count, report.total_rows
+        ));
 
         // Fleet Rows Matrix
         md.push_str("## 🤖 Fleet Agent Matrix\n\n");
