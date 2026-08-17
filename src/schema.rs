@@ -441,13 +441,34 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             format!("`{comm}` ({cpu_p:.1}% CPU, PID {pid})")
                         }).unwrap_or_else(|| "—".to_string());
 
+                        let is_expanded = view.expanded_containers.contains(&c_name.to_string());
+                        let expand_hint = if is_expanded { "▼" } else { "▶" };
                         if matches_filter(&view.filter, &[c_name, state, &top_proc_str]) {
                             md.push_str(&format!(
-                                "| **{c_name}** | {state_badge} | `{c_cpu:.1}%` | `{}` | `{} procs` | {} |\n",
+                                "| **{expand_hint} {c_name}** | {state_badge} | `{c_cpu:.1}%` | `{}` | `{} procs` | {} |\n",
                                 mb(c_rss),
                                 procs_count,
                                 top_proc_str
                             ));
+                            if is_expanded {
+                                if let Some(tps) = c["top_procs"].as_array() {
+                                    md.push_str(&format!("\n> **{c_name}** — top processes (tap again to collapse):\n\n"));
+                                    md.push_str("| PID | User | CPU % | RSS | Command |\n");
+                                    md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
+                                    for tp in tps.iter().take(6) {
+                                        let pid = tp["pid"].as_i64().unwrap_or(0);
+                                        let comm = tp["comm"].as_str().unwrap_or("?");
+                                        let cpu_p = tp["cpu_pct"].as_f64().unwrap_or(0.0);
+                                        let rss = tp["rss_kb"].as_i64().unwrap_or(0);
+                                        let user = tp["user"].as_str().unwrap_or("?");
+                                        md.push_str(&format!(
+                                            "| `{pid}` | `{user}` | `{cpu_p:.1}%` | `{}` | `{comm}` |\n",
+                                            mb(rss)
+                                        ));
+                                    }
+                                    md.push_str("\n");
+                                }
+                            }
                         }
                     }
                     md.push('\n');
