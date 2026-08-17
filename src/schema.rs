@@ -267,7 +267,7 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
 
 // ─── VIEWPORT VIEW (SaaS Dashboard in Top vs Dash modes) ───────────────────────
 
-pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport) -> Value {
+pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport, timeline: &crate::timeline::Ring) -> Value {
     let mut widgets = Vec::new();
 
     // Top filter search box in bar
@@ -593,6 +593,35 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             "\n> **Fleet rollup:** `total_cpu {:.1}%` · `total_rss {:.1} MB` · `{} live / {} total` — probe fan-out `1 ssh / host / 2s`, agent-first `server app do --session` without stealing your viewport.\n\n",
             report.total_agent_cpu_pct, report.total_agent_rss_mb, report.live_count, report.total_rows
         ));
+
+        // AXIOM-like ring history (last 60s, per-row spark)
+        let recent = timeline.since_ms(60_000);
+        if !recent.is_empty() {
+            use std::collections::BTreeMap;
+            let mut by_row: BTreeMap<String, Vec<&crate::timeline::Sample>> = BTreeMap::new();
+            for s in &recent {
+                by_row.entry(s.row.clone()).or_default().push(s);
+            }
+            md.push_str("### 📈 Last 60s — per-row spark (1s bucket, 5-min TTL)\n\n");
+            md.push_str("| Row | Samples | Avg CPU | Peak | Last RSS |\n");
+            md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
+            for (row, samples) in by_row.iter().take(12) {
+                let avg = samples.iter().map(|s| s.cpu_pct as f64).sum::<f64>() / samples.len() as f64;
+                let peak = samples.iter().map(|s| s.cpu_pct as f64).fold(0.0, f64::max);
+                let last_rss = samples.last().map(|s| s.rss_kb).unwrap_or(0);
+                md.push_str(&format!(
+                    "| `{}` | `{}` | ` {:.1}%` | ` {:.1}%` | `{}` |\n",
+                    row,
+                    samples.len(),
+                    avg,
+                    peak,
+                    mb(last_rss)
+                ));
+            }
+            md.push_str("\n");
+        } else {
+            md.push_str("> *Timeline ring filling — 5-min TTL, 1s bucket. Run 2 ticks to see spark.*\n\n");
+        }
 
         // Fleet Rows Matrix
         md.push_str("## 🤖 Fleet Agent Matrix\n\n");

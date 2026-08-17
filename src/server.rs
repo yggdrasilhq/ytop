@@ -3,7 +3,7 @@
 //! `GET /ping` (liveness + change stamp), `GET /pane/<id>` (the rich Dioxus schema),
 //! `POST /action` (all interactive actions: mode toggle, container uncollapse, jank cleanup, supervision).
 
-use crate::{booter, fleet, probe, rows, schema};
+use crate::{booter, fleet, probe, rows, schema, timeline};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -19,6 +19,7 @@ pub struct PaneState {
     pub view: schema::View,
     pub machines: Vec<fleet::Machine>,
     pub rows_report: rows::FleetRowsReport,
+    pub timeline: timeline::Ring,
     pub stamp: u64,
 }
 
@@ -40,6 +41,7 @@ pub fn spawn() -> Result<Server> {
         view: schema::View::default(),
         machines: Vec::new(),
         rows_report: rows::FleetRowsReport::default(),
+        timeline: timeline::Ring::new(Duration::from_secs(300), Duration::from_secs(1)),
         stamp: 0,
     }));
     {
@@ -75,6 +77,12 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
             last_rows = Instant::now();
             let report = rows::scan_all_hosts();
             let mut pane = state.lock().unwrap();
+            // AXIOM-like ring: one sample per live row per tick, downsampled to 1s
+            for r in &report.rows {
+                if r.is_alive {
+                    pane.timeline.push(&r.seat, r.cpu_pct, r.rss_kb, 0);
+                }
+            }
             pane.rows_report = report;
             pane.touch();
         }
@@ -128,7 +136,7 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
         }
         ("GET", "/pane/topo") => {
             let pane = state.lock().unwrap();
-            respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report));
+            respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report, &pane.timeline));
         }
         ("GET", "/pane/rail") => {
             let pane = state.lock().unwrap();

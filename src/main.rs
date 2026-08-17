@@ -8,6 +8,7 @@ mod probe;
 mod rows;
 mod schema;
 mod server;
+mod timeline;
 
 use anyhow::Result;
 use clap::Parser;
