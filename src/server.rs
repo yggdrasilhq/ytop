@@ -108,7 +108,27 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
             pane.touch();
         }
 
-        std::thread::sleep(TOPOLOGY_EVERY);
+        // Adaptive backoff for hot hosts (common: ychrome YouTube @ 50%+ WebProcess).
+        // When any host is busy (>120% total busy ≈ 7.5% avg on 16c) or ytop itself
+        // shows video-driven WebProcess >50% CPU, stretch the fleet probe from 2s → 5s.
+        // Saves ~60% SSH+proc wakeups while video plays, negligible dashboard lag.
+        let hot = {
+            let pane = state.lock().unwrap();
+            pane.machines.iter().any(|m| {
+                if !m.reachable() { return false; }
+                let p = m.principal();
+                let cpu_busy = p["cpu_busy_pct"].as_f64().unwrap_or(0.0);
+                if cpu_busy > 120.0 { return true; }
+                if let Some(tops) = p["top"].as_array() {
+                    tops.iter().any(|t| t["comm"].as_str().unwrap_or("").contains("WebKitWebProces") && t["cpu_pct"].as_f64().unwrap_or(0.0) > 45.0)
+                } else { false }
+            })
+        };
+        if hot {
+            std::thread::sleep(Duration::from_secs(5));
+        } else {
+            std::thread::sleep(TOPOLOGY_EVERY);
+        }
     }
 }
 
