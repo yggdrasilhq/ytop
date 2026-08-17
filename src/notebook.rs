@@ -155,6 +155,48 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Dash — exclusively ytrace: intelligent daemon & LLM complaints
+        Notebook {
+            id: "dash-intelligent".to_string(),
+            title: "Intelligent Daemon — resource-aware rows, SSH detach, LLM complaints".to_string(),
+            mode: "dash".to_string(),
+            description: "Each daemon watches its rows — SSH hot rows get detached & reattached, local hot rows get telemetry, every fault is a ytrace incident for LLM diagnosis.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-intelligent-p1".to_string(),
+                    title: "1. How the governor thinks".to_string(),
+                    markdown: "# Intelligent Daemon\n\n> **Governance is a verdict, not a metric.** Every 15 s the daemon samples each live row's PTY tree (`/proc/<shell_pid>/stat` delta → `core_fraction`, plus PSS). A pure `ytrace::diagnosis` says hot or not — the same code Dash and `ytrace query` use.\n\n- **SSH row** `>0.80 core × 45 s` → `incident ssh_row_hot warn` + telemetry. With `YGGTERM_GOVERNOR_SSH_DETACH=1` the reader parks (detach), reattaches 120 s later — the row stays, the hot SSH bridge doesn't burn a core.\n- **Local row** `>0.90 core or >1.5 GB × 30 s` → `incident local_row_hot / local_row_oom error` + telemetry only — never killed, LLM picks next step.\n- **Render storm** `>0.70 core × 30 s` → `render_storm warn` — the viewport throttle already landed, this files the story.\n\nAll are `payload.incident=true, complaint_for=llm` in `ytrace.jsonl` — file-first, daemon-down still readable.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "row_resource".to_string(),
+                        name: "ssh_hot".to_string(),
+                        since_ms: 60_000,
+                    }],
+                    chart: Some("timeline".to_string()),
+                },
+                Page {
+                    id: "dash-intelligent-p2".to_string(),
+                    title: "2. Where complaints live".to_string(),
+                    markdown: "## Where complaints live\n\n`ytrace` is the complaint bus. A fault is one wire record, three readers:\n\n| reader | verb |\n| --- | --- |\n| **Dash** | this notebook page — `ytrace query --app yggterm --category row_resource --since 1h --json` + sparkline of `incidents` |\n| **LLM** | `ytrace incidents --app yggterm --since 1h --json` or `query::health()` — JSON with `diagnosis`, `remedy`, `suggested_queries` (`grep <row_id>` next) |\n| **Telemetry** | `~/.yggterm/telemetry/terminal.sqlite3` (`source=resource_governor`) + `event-trace.jsonl` (`daemon/resource_governor`) — the 3-day narrative |\n\nDisable: `YGGTERM_GOVERNOR=0`. Dash keeps host atlas on Top and ytrace only on Dash — this page is Dash exclusively.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "row_resource".to_string(),
+                        name: "local_hot".to_string(),
+                        since_ms: 300_000,
+                    }],
+                    chart: None,
+                },
+                Page {
+                    id: "dash-intelligent-p3".to_string(),
+                    title: "3. Self-diagnosis playground".to_string(),
+                    markdown: "## Self-diagnosis playground\n\nTry it headlessly or via skill:\n\n```sh\nytrace incidents --app yggterm --since 5m --json | jq '.[].payload.diagnosis'\nytrace query --app yggterm --category daemon_request --name status --since 60s --top 5 --json\nytop --probe ytrace --json | jq .incidents\n# as an agent on any host:\n# POST /action notebook_compose_dash {\"title\":\"my incident\", \"ytrace_queries\":[...]}\n```\n\nThe book rule: **Top has no ytrace, Dash is exclusively ytrace.** Compose your profiling adventure as a Dash book page; `ytop --probe` is the discovery front door.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                },
+            ],
+        },
     ]
 }
 
