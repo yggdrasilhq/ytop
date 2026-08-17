@@ -11,7 +11,7 @@
 //! sessions. So the roster is READ from it, and a machine appears here for
 //! exactly as long as yggterm can actually reach it.
 //!
-//! An operator override exists (`~/.yggtopo/hosts`, one ssh alias per line)
+//! An operator override exists (`~/.ytop/hosts`, one ssh alias per line)
 //! for a machine yggterm has no session on yet. It EXTENDS the derived roster
 //! rather than replacing it, so adding one line cannot silently hide the rest.
 
@@ -109,6 +109,20 @@ pub fn machines_from_config() -> Vec<MachineEntry> {
         if let Ok(data) = std::fs::read_to_string(&path) {
             if let Ok(cfg) = serde_json::from_str::<MachinesConfig>(&data) {
                 entries.extend(cfg.machines);
+            }
+        }
+    }
+    // Prefer ~/.ytop/hosts, fallback to legacy ~/.yggtopo/hosts
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(text) = std::fs::read_to_string(home.join(".ytop").join("hosts")) {
+            for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+                if !entries.iter().any(|e| e.alias == l) {
+                    entries.push(MachineEntry {
+                        alias: l.to_string(),
+                        label: l.to_string(),
+                        is_yggdrasil: false,
+                    });
+                }
             }
         }
     }

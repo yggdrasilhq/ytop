@@ -35,7 +35,7 @@ AXIOM lays `timeline × trace × span`. ytop lays `timeline × probe × row`:
 
 ## 4. Top = htop + btop good parts + ZFS, not a fork
 
-* CPU meter: **delta** over 400ms (`/proc/stat` twice), not `ps` lifetime avg (the trap `yggtopo` already fixed). Load 1/5/15 + core count.
+* CPU meter: **delta** over 400ms (`/proc/stat` twice), not `ps` lifetime avg (the trap `ytop dash` already fixed). Load 1/5/15 + core count.
 * Memory/Swap gauge: `MemAvailable` + `SwapCached` honest, not `free`.
 * ZFS: `zpool list -Hp` + `zpool iostat 1 1` per pool, health `ONLINE/DEGRADED/FAULTED`, frag %, `zfs list -Hp` dataset table. Yggdrasil hosts auto-detect `zfs` + `lxc`.
 * LXC: collapsible tree (`depth/expanded/expand_action`) with per-container top procs (PID, CPU delta, RSS) on expand. No per-tab RSS invention — same caveat as web_surface.

@@ -1,6 +1,6 @@
-//! yggtopo's LAUNCHER MANIFEST — how the yggterm menus learn yggtopo exists.
+//! ytop dash's LAUNCHER MANIFEST — how the yggterm menus learn ytop dash exists.
 //!
-//! Written to `~/.yggterm/apps/yggtopo.json` on the app's OWN host on every
+//! Written to `~/.yggterm/apps/ytop.json` on the app's OWN host on every
 //! run, which repairs the binary path after an upgrade. The host's daemon scans
 //! the directory and deletes manifests whose binary is gone — that is the whole
 //! uninstall story. An app declares itself with a FILE, not by linking the
@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 fn manifest_value(binary: &Path) -> Value {
     json!({
-        "name": "yggtopo",
-        "label": "Yggtopo",
+        "name": "ytop",
+        "label": "Ytop Dash",
         "icon": "🌳\u{fe0e}",
         "binary": binary.to_string_lossy(),
         "verbs": [
@@ -25,7 +25,7 @@ fn manifest_value(binary: &Path) -> Value {
 
 fn write_to(apps_dir: &Path, binary: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(apps_dir)?;
-    let path = apps_dir.join("yggtopo.json");
+    let path = apps_dir.join("ytop.json");
     std::fs::write(&path, serde_json::to_string_pretty(&manifest_value(binary))?)?;
     Ok(path)
 }
@@ -43,8 +43,8 @@ mod tests {
 
     #[test]
     fn the_manifest_names_match_the_file_stem_and_the_binary_is_absolute() {
-        let value = manifest_value(Path::new("/usr/local/bin/yggtopo"));
-        assert_eq!(value["name"], "yggtopo");
+        let value = manifest_value(Path::new("/usr/local/bin/ytop"));
+        assert_eq!(value["name"], "ytop");
         assert!(value["binary"].as_str().unwrap().starts_with('/'));
         assert_eq!(value["verbs"].as_array().unwrap().len(), 2);
     }

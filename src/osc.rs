@@ -1,6 +1,6 @@
-//! The libyggterm OSC 7717 channel — yggtopo's side of the surface contract.
+//! The libyggterm OSC 7717 channel — ytop dash's side of the surface contract.
 //!
-//! yggtopo is a DOCUMENT-SURFACE app: it declares one viewport pane and one
+//! ytop dash is a DOCUMENT-SURFACE app: it declares one viewport pane and one
 //! rail pane, and yggterm renders their SCHEMA as ordinary shell DOM. No web
 //! engine, no child webview — which is what keeps the pane screenshot-faithful
 //! and reachable by the host's own automation, and is the reason the tier
@@ -34,7 +34,7 @@ pub fn emit_declare(session: &str, control: &str, document_version: &str) {
     let payload = json!({
         "session": session,
         "control": control,
-        "app_name": "Yggtopo",
+        "app_name": "Ytop Dash",
         "document_version": document_version,
         "panes": [
             {
@@ -44,7 +44,7 @@ pub fn emit_declare(session: &str, control: &str, document_version: &str) {
                 // emoji at a different size.
                 "id": "topo",
                 "icon": "🌳\u{fe0e}",
-                "title": "Yggtopo (fleet topology and live processes)",
+                "title": "Ytop Dash (fleet topology and live processes)",
                 "placement": "viewport",
             },
             {
@@ -52,7 +52,7 @@ pub fn emit_declare(session: &str, control: &str, document_version: &str) {
                 // booter while working in the terminal.
                 "id": "rail",
                 "icon": "🌳\u{fe0e}",
-                "title": "Yggtopo (fleet at a glance)",
+                "title": "Ytop Dash (fleet at a glance)",
                 "placement": "rail",
             },
         ],

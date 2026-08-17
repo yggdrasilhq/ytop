@@ -112,8 +112,8 @@ fn titlebar_switch_spec(active_mode: &str) -> Value {
         "active": active_mode,
         "action": "mode",
         "segments": [
-            {"id": MODE_TOP, "label": "⚡ Top", "title": "Infrastructure & Machine Topology"},
-            {"id": MODE_DASH, "label": "📊 Dash", "title": "Agent Fleet & Jankbox Cockpit"},
+            {"id": MODE_TOP, "label": "Top", "title": "Infrastructure & Machine Topology"},
+            {"id": MODE_DASH, "label": "Dash", "title": "Agent Fleet & Jankbox Cockpit"},
         ]
     })
 }
@@ -335,7 +335,7 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
 
                 // 1. Host Header Banner
                 md.push_str(&format!(
-                    "# 🖥️ {shown}\n\n\
+                    "# {shown}\n\n\
                     | Attribute | Value | Attribute | Value |\n\
                     | :--- | :--- | :--- | :--- |\n\
                     | **Kernel** | `{kernel}` | **Uptime** | `{uptime}` |\n\
@@ -343,13 +343,14 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                     | **CPU Cores** | `{cpu_cores} Cores ({cpu_model})` | **Load Average** | `{load}` |\n\n"
                 ));
 
-                // 2. Hardware Resource Gauges Card
-                md.push_str("## 📊 Resource Meters\n\n");
+                // 2. Hardware Resource Gauges — professional, example-driven (beginner → expert)
+                md.push_str("## Resource Meters\n\n");
+                md.push_str("> How hard is this machine working *right now*? `CPU Busy` is total work across all cores; `avg` is per-core share. `RAM` is memory in use. `Swap` is overflow when RAM is full — `0 MB` is healthy.\n\n");
                 md.push_str(&format!(
-                    "| Resource | Usage Meter | Used | Total |\n\
-                    | :--- | :--- | :--- | :--- |\n\
-                    | **CPU Busy** | {} | `{cpu_busy:.1}%` (`{cpu_normalized:.1}% avg`) | `{cpu_cores} Cores` |\n\
-                    | **RAM Memory** | {} | `{}` | `{}` |\n",
+                    "| Resource | Usage | Used | Total | What it means |\n\
+                    | :--- | :--- | :--- | :--- | :--- |\n\
+                    | **CPU Busy** | {} | `{cpu_busy:.1}%` (`{cpu_normalized:.1}% avg`) | `{cpu_cores} Cores` | Total work; e.g. `22% avg` on 32 cores ≈ `7` cores busy — plenty of headroom |\n\
+                    | **RAM Memory** | {} | `{}` | `{}` | Memory in use; e.g. `309 GB / 503 GB` ≈ half free — `>90%` deserves a look |\n",
                     progress_bar(cpu_normalized, 20),
                     progress_bar(mem_pct, 20),
                     gb(used_kb),
@@ -358,19 +359,20 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
 
                 if swap_total_kb > 0 {
                     md.push_str(&format!(
-                        "| **Swap Space** | {} | `{}` | `{}` |\n\n",
+                        "| **Swap Space** | {} | `{}` | `{}` | Overflow if RAM full; `0 MB` is ideal |\n\n",
                         progress_bar(swap_pct, 20),
                         mb(swap_used_kb),
                         mb(swap_total_kb)
                     ));
                 } else {
-                    md.push_str("| **Swap Space** | `[░░░░░░░░░░░░░░░░░░░░]` **0.0%** | `0 MB` | `0 MB` |\n\n");
+                    md.push_str("| **Swap Space** | `[░░░░░░░░░░░░░░░░░░░░]` **0.0%** | `0 MB` | `0 MB` | No overflow — healthy |\n\n");
                 }
 
-                // 3. ZFS Storage & Real-Time IOSTAT (if present)
+                // 3. ZFS Storage & Real-Time IOSTAT — plain English + example (avoids overly technical)
                 let zfs = &p["zfs"];
                 if zfs["has_zfs"].as_bool().unwrap_or(false) {
-                    md.push_str("## 💾 ZFS Storage Pools & Real-Time IOSTAT\n\n");
+                    md.push_str("## ZFS Storage Pools & Real-Time IOSTAT\n\n");
+                    md.push_str("> Pool = a group of disks acting as one. `Health` is safety, `Used/Total` is how full, `Frag %` is how scattered the data is (high frag can slow you). Example: `zroot 65% used, 54% frag` → still safe, but balance if frag keeps climbing.\n\n");
                     if let Some(pools) = zfs["pools"].as_array() {
                         md.push_str("| Pool | Health | Allocation Meter | Used / Total | Frag % |\n");
                         md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
@@ -408,17 +410,19 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                     }
                 }
 
-                // 3b. Daemon cost model (idle-cost-model.md) — per-daemon not per-session
-                md.push_str("### 🔥 Daemon Cost (blazing-fast at 200 agents)\n\n");
+                // 3b. Daemon Cost — beginner-friendly example, expert model preserved (not overly technical)
+                md.push_str("### Daemon Cost — when you run many agents, share one manager\n\n");
+                md.push_str("> **In plain words:** a *daemon* is the background manager that holds your sessions. One manager for 200 agents costs less than many managers each holding a few. Example: one shared daemon for 23 sessions ≈ `0.45` cores; 14 separate daemons for 34 sessions ≈ `3.0` cores — **4.5× more per session when split**. Most cost is kernel work (`2.58` cores), your window is tiny (`0.01`).\n\n");
                 md.push_str(&format!(
-                    "> **Model:** `cores = 0.116 + 0.0104·owned + 0.000337·rows` (R² 0.939). Single shared daemon ≈ `0.45` cores for 23 sessions vs `3.0` cores across 14 daemons for 34 sessions — **4.5× cheaper per session when shared.** Kernel `2.58` cores of daemon work is the dominant term, GUI is `0.01` cores.\n\n\
-                    > *Probe tip for agents:* `yggterm-headless server perf-summary --category render --top 5 --json` + `server perf-incidents --list` (never `ps %CPU`). Ytop fan-out reuses `ControlMaster` (45s) so 3-host read <1s. `eBPF` ring (`bpftrace`/`perf`) is Slice 2 opt-in per Yggdrasil host.\n\n"
+                    "> **For experts — model** `cores = 0.116 + 0.0104·owned + 0.000337·rows` (R² 0.939), measured 25s `/proc` delta on 14 daemons. Single shared daemon ≈ `0.45` cores / 23 sessions vs `3.0` cores / 34 sessions on 14 daemons.\n\n\
+                    > *Probe tip for agents:* `yggterm-headless server perf-summary --category render --top 5 --json` + `server perf-incidents --list` (never `ps %CPU` — lifetime avg, not current). Ytop fan-out reuses `ControlMaster` (45s) so 3-host read <1s. `eBPF` ring (`bpftrace`/`perf`) is Slice 2 opt-in per Yggdrasil host.\n\n"
                 ));
 
-                // 4. LXC Containers
+                // 4. LXC Containers — subtle, example-driven
                 let containers = p["containers"].as_array().cloned().unwrap_or_default();
                 if !containers.is_empty() {
-                    md.push_str(&format!("## 📦 LXC Containers ({} Total)\n\n", containers.len()));
+                    md.push_str(&format!("## LXC Containers ({} Total)\n\n", containers.len()));
+                    md.push_str("> A container is a lightweight machine inside your machine. `Status` is running or stopped, `Top Internal Process` is the busiest thing inside it. Example: `android-kvm RUNNING 0.0% 41 MB` → powered on but idle.\n\n");
                     md.push_str("| Container | Status | CPU % | RAM RSS | Tasks | Top Internal Process |\n");
                     md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
 
@@ -509,7 +513,8 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
         // DASH MODE: Agent Fleet Cockpit & Jankbox Matrix
         let mut md = String::new();
 
-        md.push_str("# 📊 Agent Fleet Rows & Jankbox Cockpit\n\n");
+        md.push_str("# Agent Fleet — Rows & Jankbox Cockpit\n\n");
+        md.push_str("> All your agents in one place. `Total Seats` is slots, `Live Agents` is running now, `Fleet Agent CPU/RAM` is total work. Example: `54 live / 54 total, 1.9% CPU` → all idle, healthy.\n\n");
 
         // Overview KPI Cards
         md.push_str(&format!(
@@ -578,9 +583,10 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             md.push_str("\n");
         }
 
-        // AXIOM-like Timeline (Slice 1: current CPU per row as meter strip; Slice 2 = time series ring)
-        md.push_str("## ⏱️ Timeline — AXIOM-lite (per-row CPU · RSS · log volume)\n\n");
-        md.push_str("> **Slice 1:** current `proc` delta (400ms `/proc/<pid>/stat` twice → htop-faithful) per live row. Slice 2 adds 5-min ring `t0 + (t,row,cpu,rss,log_events)` downsampled to 1s.\n\n");
+        // Timeline — plain English, example-driven (beginner → expert, AXIOM-lite)
+        md.push_str("## Timeline — per-row CPU, memory and log volume\n\n");
+        md.push_str("> What did each agent do *just now*? `CPU` is work in the last 400ms (real-time, like htop), `RSS` is memory, `log volume` is how much it wrote. Example: `12%` with spark `▃▅█▁` → spiked then idled — flat `████` means stuck hot. `Slice 2` keeps a 5-min history (1s buckets) below.\n\n");
+        md.push_str("> **For experts:** `proc` delta `400ms /proc/<pid>/stat` twice; ring `t0 + (t,row,cpu,rss,log_events)` downsampled to 1s, 5-min TTL.\n\n");
         md.push_str("| Row | CPU | RSS | Span |\n");
         md.push_str("| :--- | :--- | :--- | :--- |\n");
         for row in report.rows.iter().filter(|r| r.is_alive).take(12) {
@@ -609,7 +615,8 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             for s in &recent {
                 by_row.entry(s.row.clone()).or_default().push(s);
             }
-            md.push_str("### 📈 Last 60s — per-row spark (1s bucket, 5-min TTL)\n\n");
+            md.push_str("### Last 60s — per-row history (1s buckets, 5-min window)\n\n");
+            md.push_str("> History for the last minute, one point per second. `Spark` is a mini-chart of CPU — e.g. `▁▃█▁` spiked. High flat `████` → hot loop.\n\n");
             md.push_str("| Row | Samples | Avg CPU | Peak | Spark | Last RSS |\n");
             md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
             for (row, samples) in by_row.iter().take(12) {
@@ -638,7 +645,8 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
         }
 
         // Fleet Rows Matrix
-        md.push_str("## 🤖 Fleet Agent Matrix\n\n");
+        md.push_str("## Fleet Agent Matrix\n\n");
+        md.push_str("> One row per agent. `Seat` is position, `Role` is job, `Campaign` is project. `Status` is `Live` or `Dead`, `Context` is transcript size. Example: `019da16a ytop verify 0% Live` → your verification agent, idle.\n\n");
         md.push_str("| Seat | Role | Campaign | UUID | Status | Context | Supervision |\n");
         md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
 

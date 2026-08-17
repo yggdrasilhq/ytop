@@ -1,4 +1,4 @@
-# yggtopo
+# ytop dash
 
 **`lstopo` + `htop`, for a yggterm fleet.** The machines, the containers they
 host, and what is actually burning them right now — as one view. Plus an off
@@ -14,7 +14,7 @@ Outside yggterm it is a plain CLI that prints the same reading, because an app
 that can only exist inside a GUI cannot be checked without one.
 
 ```
-$ yggtopo --once
+$ ytop dash --once
 
 alpha · 16 × Example CPU E1 · kernel 9.9.9-invented
   ├─ alpha          55.2% cpu    659 procs  (none)
@@ -44,7 +44,7 @@ distinct machines booting in the same second cannot collide.
 ⛔ **`ps %CPU` is a lifetime average** — total CPU over total age — so a process
 that burned a core for an hour and has slept since reads as busy forever, and
 one that started spinning ten seconds ago reads as idle. A view built on it is a
-biography, not a live view. yggtopo samples `/proc/<pid>/stat` twice and reports
+biography, not a live view. ytop dash samples `/proc/<pid>/stat` twice and reports
 the delta, which is what htop actually does.
 
 **Booter.** Who is armed, when they are due, and the switch that turns it off.
@@ -52,7 +52,7 @@ The fleet's booter is a watchdog that kicks stalled agent sessions; it could
 always be stood down by someone with a shell on the right machine who knew the
 verb, which is not an off switch but a rumour of one.
 
-⛔ **yggtopo re-implements none of it.** Every read is `ygg-booter.py … --json`
+⛔ **ytop dash re-implements none of it.** Every read is `ygg-booter.py … --json`
 and every write is one of its verbs. Two answers to "is the booter on right now"
 is the defect this pane exists to remove, not to double.
 
@@ -81,9 +81,9 @@ cargo test
 
 | | |
 |---|---|
-| `~/.yggtopo/hosts` | extra ssh aliases, one per line. **Extends** the roster yggterm already knows; it never replaces it, so adding one line cannot silently hide the rest. |
-| `YGGTOPO_REFRESH_SECS` | how often the machines are re-read (default 2). This is an ssh fan-out, not a local read — a bigger fleet on a slower link wants a bigger number. |
-| `YGGTOPO_BOOTER` | path to `ygg-booter.py`. Otherwise taken from the running watcher's own command line, and failing that from the conventional checkout path. |
+| `~/.ytop/hosts` | extra ssh aliases, one per line. **Extends** the roster yggterm already knows; it never replaces it, so adding one line cannot silently hide the rest. Legacy `~/.yggtopo/hosts` still read. |
+| `YTOP_REFRESH_SECS` | how often the machines are re-read (default 2). This is an ssh fan-out, not a local read — a bigger fleet on a slower link wants a bigger number. Legacy `YGGTOPO_REFRESH_SECS` still honoured. |
+| `YTOP_BOOTER` | path to `ygg-booter.py`. Otherwise taken from the running watcher's own command line, and failing that from the conventional checkout path. Legacy `YGGTOPO_BOOTER` still honoured. |
 
 No agent is installed on the machines it reads: the probe is sent over ssh on
 stdin and run there, so a freshly added host works with no deployment.

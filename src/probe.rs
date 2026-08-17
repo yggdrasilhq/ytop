@@ -41,8 +41,8 @@ const TOP_N: usize = 12;
 const PROBE: &str = r#"
 import json, os, time, subprocess, re
 
-SAMPLE_MS = int(os.environ.get("YGGTOPO_SAMPLE_MS", "400"))
-TOP_N = int(os.environ.get("YGGTOPO_TOP_N", "12"))
+SAMPLE_MS = int(os.environ.get("YTOP_SAMPLE_MS", os.environ.get("YGGTOPO_SAMPLE_MS", "400")))
+TOP_N = int(os.environ.get("YTOP_TOP_N", os.environ.get("YGGTOPO_TOP_N", "12")))
 
 def read(path, default=""):
     try:
@@ -338,7 +338,7 @@ print(json.dumps({
 }))
 "#;
 
-/// Multiplexed-connection options, in yggtopo's own runtime directory.
+/// Multiplexed-connection options, in ytop dash's own runtime directory.
 ///
 /// ⚠ ITS OWN SOCKET DIRECTORY, NOT THE USER'S. Writing control sockets into
 /// `~/.ssh/` would leave this app's plumbing in a directory whose contents
@@ -347,7 +347,7 @@ print(json.dumps({
 fn control_master_options() -> Vec<String> {
     let base = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".yggtopo")
+        .join(".ytop")
         .join("ssh");
     if std::fs::create_dir_all(&base).is_err() {
         return Vec::new();
@@ -395,7 +395,9 @@ pub fn read_host(host: Option<&str>, timeout: Duration) -> Value {
         }
     };
     command
+        .env("YTOP_SAMPLE_MS", CPU_SAMPLE_MS.to_string())
         .env("YGGTOPO_SAMPLE_MS", CPU_SAMPLE_MS.to_string())
+        .env("YTOP_TOP_N", TOP_N.to_string())
         .env("YGGTOPO_TOP_N", TOP_N.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

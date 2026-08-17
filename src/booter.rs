@@ -7,7 +7,7 @@
 //! "is the booter on right now" is the whole defect this pane exists to fix.
 //!
 //! So every read is `ygg-booter.py … --json` and every write is one of its
-//! verbs. yggtopo renders and drives; the booter decides.
+//! verbs. ytop dash renders and drives; the booter decides.
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -23,9 +23,14 @@ use std::time::Duration;
 /// case that matters most: nothing is running, which is exactly when someone
 /// wants to arm it.
 pub fn script_path() -> (PathBuf, &'static str) {
-    if let Ok(explicit) = std::env::var("YGGTOPO_BOOTER") {
+    if let Ok(explicit) = std::env::var("YTOP_BOOTER") {
         if !explicit.trim().is_empty() {
-            return (PathBuf::from(explicit), "YGGTOPO_BOOTER");
+            return (PathBuf::from(explicit), "YTOP_BOOTER");
+        }
+    }
+    if let Ok(legacy) = std::env::var("YGGTOPO_BOOTER") {
+        if !legacy.trim().is_empty() {
+            return (PathBuf::from(legacy), "YGGTOPO_BOOTER");
         }
     }
     if let Some(from_pid) = from_running_watcher() {
@@ -168,7 +173,7 @@ pub fn defer(host: Option<&str>, uuid: &str, secs: u32, timeout: Duration) -> Va
     let secs = secs.to_string();
     run(
         host,
-        &["defer", "--row", uuid, "--secs", &secs, "--note", "'deferred from yggtopo'"],
+        &["defer", "--row", uuid, "--secs", &secs, "--note", "'deferred from ytop dash'"],
         timeout,
     )
 }
