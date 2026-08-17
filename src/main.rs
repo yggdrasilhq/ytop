@@ -3,6 +3,7 @@
 mod booter;
 mod fleet;
 mod manifest;
+mod notebook;
 mod osc;
 mod probe;
 mod rows;

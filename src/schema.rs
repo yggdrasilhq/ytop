@@ -22,6 +22,9 @@ pub struct View {
     pub new_machine_alias: String,
     pub new_machine_label: String,
     pub new_machine_is_yggdrasil: bool,
+    pub selected_notebook: Option<String>,
+    pub selected_page: Option<String>,
+    pub expanded_notebooks: Vec<String>,
 }
 
 impl Default for View {
@@ -36,6 +39,9 @@ impl Default for View {
             new_machine_alias: String::new(),
             new_machine_label: String::new(),
             new_machine_is_yggdrasil: false,
+            selected_notebook: None,
+            selected_page: None,
+            expanded_notebooks: Vec::new(),
         }
     }
 }
@@ -99,6 +105,13 @@ fn spark_char(pct: f64) -> char {
 
 fn label(text: impl Into<String>) -> Value {
     json!({"kind": "label", "text": text.into()})
+}
+
+fn chrono_like_now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default()
 }
 
 fn section(text: impl Into<String>, card: bool) -> Value {
@@ -206,6 +219,41 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
                 "action": "add_machine_prompt",
             }));
         }
+        // ── Top notebooks shelf (yedit sidebar pattern: books → pages) ──
+        // Top has NO ytrace — host atlas pages only.
+        widgets.push(section("📚 Host Notebooks — Top (no ytrace)", true));
+        for nb in crate::notebook::list_notebooks(Some("top")) {
+            let expanded = view.expanded_notebooks.contains(&nb.id);
+            let is_selected = view.selected_notebook.as_deref() == Some(&nb.id);
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("notebook:{}", nb.id),
+                "title": format!("{}  ·  {} pages", nb.title, nb.pages.len()),
+                "description": nb.description,
+                "status": if is_selected { "durable" } else { "transient" },
+                "selected": is_selected,
+                "row_action": format!("notebook_toggle:{}", nb.id),
+            }));
+            if expanded {
+                for (idx, page) in nb.pages.iter().enumerate() {
+                    let selected_page = view.selected_page.as_deref() == Some(&page.id);
+                    widgets.push(json!({
+                        "kind": "list-row",
+                        "id": format!("page:{}:{}", nb.id, page.id),
+                        "title": format!("  {} {}", if selected_page { "▸" } else { "·" }, page.title),
+                        "status": "transient",
+                        "selected": selected_page,
+                        "row_action": format!("page_open:{}:{}", nb.id, idx),
+                    }));
+                }
+            }
+        }
+        widgets.push(json!({
+            "kind": "button",
+            "id": "compose_notebook_btn_top",
+            "label": "✏️ Compose Notebook (Top)",
+            "action": "notebook_compose_top",
+        }));
     } else {
         // DASH MODE RAIL: Fleet Overview, Supervision & Jankbox Controls
         widgets.push(section("Fleet Overview", true));
@@ -259,6 +307,42 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
                 "danger": true,
             }));
         }
+
+        // ── Dash notebooks shelf (yedit sidebar pattern: books → pages) ──
+        // Dash exclusively ytrace — each page carries ytrace queries.
+        widgets.push(section("📚 Profiling Notebooks — Dash (ytrace)", true));
+        for nb in crate::notebook::list_notebooks(Some("dash")) {
+            let expanded = view.expanded_notebooks.contains(&nb.id);
+            let is_selected = view.selected_notebook.as_deref() == Some(&nb.id);
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("notebook:{}", nb.id),
+                "title": format!("{}  ·  {} pages", nb.title, nb.pages.len()),
+                "description": nb.description,
+                "status": if is_selected { "durable" } else { "transient" },
+                "selected": is_selected,
+                "row_action": format!("notebook_toggle:{}", nb.id),
+            }));
+            if expanded {
+                for (idx, page) in nb.pages.iter().enumerate() {
+                    let selected_page = view.selected_page.as_deref() == Some(&page.id);
+                    widgets.push(json!({
+                        "kind": "list-row",
+                        "id": format!("page:{}:{}", nb.id, page.id),
+                        "title": format!("  {} {}", if selected_page { "▸" } else { "·" }, page.title),
+                        "status": if page.has_ytrace() { "durable" } else { "transient" },
+                        "selected": selected_page,
+                        "row_action": format!("page_open:{}:{}", nb.id, idx),
+                    }));
+                }
+            }
+        }
+        widgets.push(json!({
+            "kind": "button",
+            "id": "compose_notebook_btn",
+            "label": "✏️ Compose Notebook (Dash)",
+            "action": "notebook_compose_dash",
+        }));
     }
 
     json!({
@@ -274,6 +358,57 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
 // ─── VIEWPORT VIEW (SaaS Dashboard in Top vs Dash modes) ───────────────────────
 
 pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport, timeline: &crate::timeline::Ring, zfs_history: &std::collections::VecDeque<crate::server::ZfsIoSample>) -> Value {
+    // If a notebook page is selected, render the book page (paper) — like turning a page.
+    // Both Top and Dash have books; Top pages have NO ytrace, Dash pages exclusively ytrace.
+    if let Some(nb_id) = &view.selected_notebook {
+        if let Some(nb) = crate::notebook::get_notebook(nb_id) {
+            if let Some(page_id) = &view.selected_page {
+                if let Some(page) = nb.pages.iter().find(|p| &p.id == page_id) {
+                    let mut widgets = Vec::new();
+                    // Book chrome: back to dashboards
+                    widgets.push(json!({
+                        "kind": "button",
+                        "id": "book_back",
+                        "label": format!("← Back to {}", if view.mode == MODE_TOP { "Top" } else { "Dash" }),
+                        "action": "refresh",
+                    }));
+                    let ytrace_badge = if page.has_ytrace() { " 🔬 ytrace" } else { " · host-only" };
+                    widgets.push(json!({
+                        "kind": "markdown",
+                        "id": format!("book_page:{}", page.id),
+                        "source": format!("{}\n\n> **{}**{}  ·  notebook `{}` · page `{}`\n\n{}",
+                            page.markdown,
+                            nb.title, ytrace_badge, nb.id, page.id,
+                            if page.has_ytrace() {
+                                let qs: Vec<String> = page.ytrace_queries.iter().map(|q| format!("`{} {}/{}` `since {}ms`", q.provider, q.category, q.name, q.since_ms)).collect();
+                                format!("\n---\n> **ytrace queries on this page** (Dash exclusively ytrace): {}\n> Run `ytrace query --app {} --category {} --since {}` to reproduce. Chart: `{}`\n", qs.join(" · "), page.ytrace_queries.first().map(|q| q.provider.as_str()).unwrap_or("yggterm"), page.ytrace_queries.first().map(|q| q.category.as_str()).unwrap_or("render"), page.ytrace_queries.first().map(|q| q.since_ms).unwrap_or(60000), page.chart.as_deref().unwrap_or("sparkline"))
+                            } else { "---\n> Host notebook — Top has no ytrace, only `probe.rs` 400 ms delta.".to_string() }
+                        ),
+                    }));
+                    if nb.mode == "dash" && page.has_ytrace() {
+                        // Inline ytrace preview — latest query summary if available locally
+                        if let Some(q) = page.ytrace_queries.first() {
+                            let home = ytrace::compat::resolve_home(&q.provider);
+                            let sums = ytrace::query::summarize(&home, Some(&q.category), Some(chrono_like_now_ms() - q.since_ms as u128));
+                            let mut md = String::from("## ytrace sample (local) — file-first, not ps\n\n| probe | count | total | p50 | p95 |\n| :--- | :--- | :--- | :--- | :--- |\n");
+                            for s in sums.iter().take(6) {
+                                md.push_str(&format!("| `{}/{}` | {} | {:.1} ms | {:.1} ms | {:.1} ms |\n", s.category, s.name, s.count, s.total_ms, s.p50_ms, s.p95_ms));
+                            }
+                            if sums.is_empty() { md.push_str("| — | — | — | — | — |\n> *No ytrace records yet — run `yggterm` with ytrace or check `YTRACE_HOME`.*\n"); }
+                            widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
+                        }
+                    }
+                    return json!({
+                        "title": format!("📖 {} — {}", nb.title, page.title),
+                        "titlebar_switch": titlebar_switch_spec(&view.mode),
+                        "widgets": widgets,
+                        "footer": [json!({"kind": "button", "id": "next_page", "action": "refresh", "label": "Next →"})]
+                    });
+                }
+            }
+        }
+    }
+
     let mut widgets = Vec::new();
 
     // Top filter search box in bar

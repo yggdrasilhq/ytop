@@ -500,6 +500,16 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "ytrace",
+]
+
+[[package]]
+name = "ytrace"
+version = "0.1.0"
+source = "git+https://github.com/yggdrasilhq/ytrace?branch=main#ad5b643f78f726fb185f57b547e6d3fcb51878c3"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

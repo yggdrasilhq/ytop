@@ -242,6 +242,69 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 let _ = booter::release_rate_limit_hold(None);
                 pane.view.notice = Some("▶ Quota hold released".to_string());
                 pane.touch();
+            } else if let Some(id) = action.strip_prefix("notebook_toggle:") {
+                let nb_id = id.to_string();
+                if let Some(pos) = pane.view.expanded_notebooks.iter().position(|x| x == &nb_id) {
+                    pane.view.expanded_notebooks.remove(pos);
+                } else {
+                    pane.view.expanded_notebooks.push(nb_id.clone());
+                    pane.view.selected_notebook = Some(nb_id);
+                }
+                pane.touch();
+            } else if let Some(rest) = action.strip_prefix("page_open:") {
+                if let Some((nb_id, idx_str)) = rest.split_once(':') {
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        pane.view.selected_notebook = Some(nb_id.to_string());
+                        if let Some(nb) = crate::notebook::get_notebook(nb_id) {
+                            if let Some(page) = nb.pages.get(idx) {
+                                pane.view.selected_page = Some(page.id.clone());
+                                pane.view.notice = Some(format!("📖 {} — {}", nb.title, page.title));
+                            }
+                        }
+                    }
+                }
+                pane.touch();
+            } else if action == "notebook_compose_dash" || action == "notebook_compose_top" {
+                // Skill composition: body["payload"]["title"] + ["pages"] JSON → write notebook file.
+                let mode = if action.ends_with("_dash") { "dash" } else { "top" };
+                let title = body.get("payload").and_then(|p| p.get("title")).and_then(Value::as_str).unwrap_or("Untitled Notebook").to_string();
+                let desc = body.get("payload").and_then(|p| p.get("description")).and_then(Value::as_str).unwrap_or("Composed via ytop skill").to_string();
+                let author = body.get("payload").and_then(|p| p.get("author")).and_then(Value::as_str).unwrap_or("agent").to_string();
+                let id = format!("{}-{}", mode, title.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-").trim_matches('-'));
+                let pages_raw = body.get("payload").and_then(|p| p.get("pages")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                let pages: Vec<crate::notebook::Page> = pages_raw.into_iter().filter_map(|pv| {
+                    let title = pv.get("title").and_then(Value::as_str)?.to_string();
+                    let markdown = pv.get("markdown").and_then(Value::as_str).unwrap_or("").to_string();
+                    serde_json::from_value::<crate::notebook::Page>(pv).ok().or(Some(crate::notebook::Page {
+                        id: format!("{}-{}", id, title.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-")),
+                        title,
+                        markdown,
+                        ytrace_queries: vec![],
+                        chart: None,
+                    }))
+                }).collect();
+                let nb = crate::notebook::Notebook {
+                    id: id.clone(),
+                    title: title.clone(),
+                    mode: mode.to_string(),
+                    description: desc,
+                    author,
+                    created_at_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0),
+                    pages: if pages.is_empty() {
+                        vec![crate::notebook::Page {
+                            id: format!("{id}-p1"),
+                            title: "Page 1".to_string(),
+                            markdown: format!("# {title}\n\nComposed via ytop skill on host `{}`.", pane.view.selected_host),
+                            ytrace_queries: vec![],
+                            chart: None,
+                        }]
+                    } else { pages },
+                };
+                match crate::notebook::write_notebook(&nb) {
+                    Ok(path) => pane.view.notice = Some(format!("✏️ Notebook '{}' written to {}", nb.title, path.display())),
+                    Err(e) => pane.view.notice = Some(format!("⛔ Notebook write failed: {e}")),
+                }
+                pane.touch();
             } else if action == "refresh" {
                 pane.touch();
             }
