@@ -91,6 +91,12 @@ pub fn plain_progress_bar(pct: f64, width: usize) -> String {
     format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), clamped)
 }
 
+fn spark_char(pct: f64) -> char {
+    match (pct.clamp(0.0, 100.0) / 12.5) as usize {
+        0 => '▁', 1 => '▂', 2 => '▃', 3 => '▄', 4 => '▅', 5 => '▆', 6 => '▇', _ => '█',
+    }
+}
+
 fn label(text: impl Into<String>) -> Value {
     json!({"kind": "label", "text": text.into()})
 }
@@ -267,7 +273,7 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
 
 // ─── VIEWPORT VIEW (SaaS Dashboard in Top vs Dash modes) ───────────────────────
 
-pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport, timeline: &crate::timeline::Ring) -> Value {
+pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport, timeline: &crate::timeline::Ring, zfs_history: &std::collections::VecDeque<crate::server::ZfsIoSample>) -> Value {
     let mut widgets = Vec::new();
 
     // Top filter search box in bar
@@ -401,12 +407,21 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                         let r_bytes = io.get("read_bytes_s").and_then(Value::as_i64).unwrap_or(0);
                         let w_bytes = io.get("write_bytes_s").and_then(Value::as_i64).unwrap_or(0);
                         md.push_str(&format!(
-                            "> ⚡ **Live I/O Throughput**: Read **{}/s** ({} IOPS)  ·  Write **{}/s** ({} IOPS)\n\n",
+                            "> Live I/O (now): Read **{}/s** ({} IOPS)  ·  Write **{}/s** ({} IOPS)\n\n",
                             bytes_to_human(r_bytes),
                             r_ops,
                             bytes_to_human(w_bytes),
                             w_ops
                         ));
+                        if zfs_history.len() > 1 {
+                            let max_r = zfs_history.iter().map(|s| s.read_bps).max().unwrap_or(1).max(1) as f64;
+                            let max_w = zfs_history.iter().map(|s| s.write_bps).max().unwrap_or(1).max(1) as f64;
+                            let spark_r: String = zfs_history.iter().map(|s| spark_char(s.read_bps as f64 / max_r * 100.0)).collect();
+                            let spark_w: String = zfs_history.iter().map(|s| spark_char(s.write_bps as f64 / max_w * 100.0)).collect();
+                            md.push_str(&format!("> Last 60s (2s buckets, 30 samples): read spark `{spark_r}` · write spark `{spark_w}` — e.g. `▁▃█▁` spiked then cooled. Flat high `████` means sustained load.\n\n"));
+                        } else if !zfs_history.is_empty() {
+                            md.push_str("> Gathering 60s history — one sample per 2s (wait ~6s for spark).\n\n");
+                        }
                     }
                 }
 
@@ -417,6 +432,16 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                     "> **For experts — model** `cores = 0.116 + 0.0104·owned + 0.000337·rows` (R² 0.939), measured 25s `/proc` delta on 14 daemons. Single shared daemon ≈ `0.45` cores / 23 sessions vs `3.0` cores / 34 sessions on 14 daemons.\n\n\
                     > *Probe tip for agents:* `yggterm-headless server perf-summary --category render --top 5 --json` + `server perf-incidents --list` (never `ps %CPU` — lifetime avg, not current). Ytop fan-out reuses `ControlMaster` (45s) so 3-host read <1s. `eBPF` ring (`bpftrace`/`perf`) is Slice 2 opt-in per Yggdrasil host.\n\n"
                 ));
+
+                // 3c. eBPF Live Probes — collapsed by default, only when tools present (opt-in)
+                let ebpf_avail = p["ebpf_available"].as_bool().unwrap_or(false);
+                let ebpf_tools = p["ebpf_tools"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+                if ebpf_avail {
+                    md.push_str("### eBPF Live Probes — opt-in, no overhead until you need it\n\n");
+                    md.push_str(&format!("> Tools found: `{ebpf_tools}`. Use for deep dives when Top's 400ms delta isn't enough. Example: `sudo bpftrace -e 'tracepoint:sched:sched_switch {{ @[comm] = count(); }}'` → hot task histogram. Or `perf top -a` for kernel hotspots. Keep off by default — zero cost when idle.\n\n"));
+                } else {
+                    md.push_str("> eBPF probes hidden — install `bpftrace` or `perf` to enable live kernel tracing (zero overhead when not installed).\n\n");
+                }
 
                 // 4. LXC Containers — subtle, example-driven
                 let containers = p["containers"].as_array().cloned().unwrap_or_default();

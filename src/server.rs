@@ -15,11 +15,18 @@ const TOPOLOGY_EVERY: Duration = Duration::from_secs(2);
 const ROWS_EVERY: Duration = Duration::from_secs(4);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
+pub struct ZfsIoSample {
+    pub t_ms: u64,
+    pub read_bps: i64,
+    pub write_bps: i64,
+}
+
 pub struct PaneState {
     pub view: schema::View,
     pub machines: Vec<fleet::Machine>,
     pub rows_report: rows::FleetRowsReport,
     pub timeline: timeline::Ring,
+    pub zfs_history: std::collections::VecDeque<ZfsIoSample>,
     pub stamp: u64,
 }
 
@@ -42,6 +49,7 @@ pub fn spawn() -> Result<Server> {
         machines: Vec::new(),
         rows_report: rows::FleetRowsReport::default(),
         timeline: timeline::Ring::new(Duration::from_secs(300), Duration::from_secs(1)),
+        zfs_history: std::collections::VecDeque::with_capacity(30),
         stamp: 0,
     }));
     {
@@ -69,6 +77,19 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
         let machines = fleet::group(readings);
         {
             let mut pane = state.lock().unwrap();
+            // ZFS I/O spark history — 2s delta, keep 30 points (60s) like AXIOM ring
+            if let Some(m) = machines.iter().find(|m| m.reachable()) {
+                let p = m.principal();
+                if let Some(io) = p["zfs"]["iostat"].as_object() {
+                    let r = io.get("read_bytes_s").and_then(Value::as_i64).unwrap_or(0);
+                    let w = io.get("write_bytes_s").and_then(Value::as_i64).unwrap_or(0);
+                    let t_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::from_secs(0)).as_millis() as u64;
+                    pane.zfs_history.push_back(ZfsIoSample { t_ms, read_bps: r, write_bps: w });
+                    while pane.zfs_history.len() > 30 {
+                        pane.zfs_history.pop_front();
+                    }
+                }
+            }
             pane.machines = machines;
             pane.touch();
         }
@@ -136,7 +157,7 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
         }
         ("GET", "/pane/topo") => {
             let pane = state.lock().unwrap();
-            respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report, &pane.timeline));
+            respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report, &pane.timeline, &pane.zfs_history));
         }
         ("GET", "/pane/rail") => {
             let pane = state.lock().unwrap();

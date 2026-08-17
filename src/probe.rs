@@ -312,6 +312,14 @@ if zfs_bin and zfs_info["has_zfs"]:
     except Exception:
         pass
 
+# eBPF tools detection (opt-in, no overhead if missing)
+ebpf_tools = []
+for _t in ["bpftrace", "perf", "bpftool"]:
+    _p, _ = which(_t)
+    if _p:
+        ebpf_tools.append(_t)
+ebpf_available = len(ebpf_tools) > 0
+
 uptime = read("/proc/uptime").split()
 print(json.dumps({
     "ok": True,
@@ -325,6 +333,8 @@ print(json.dumps({
     "containers": guests,
     "container_tool": tool,
     "zfs": zfs_info,
+    "ebpf_available": ebpf_available,
+    "ebpf_tools": ebpf_tools,
     "uptime_s": float(uptime[0]) if uptime else 0.0,
     "load": [float(v) for v in read("/proc/loadavg").split()[:3]] or [0, 0, 0],
     "mem_total_kb": mem.get("MemTotal", 0),
