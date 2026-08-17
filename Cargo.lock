@@ -506,8 +506,10 @@ dependencies = [
 [[package]]
 name = "ytrace"
 version = "0.1.0"
-source = "git+https://github.com/yggdrasilhq/ytrace?branch=main#ad5b643f78f726fb185f57b547e6d3fcb51878c3"
+source = "git+https://github.com/yggdrasilhq/ytrace?branch=main#c1d2b8aabdf7b9132c42ff2df211d0f99779a4cb"
 dependencies = [
+ "anyhow",
+ "clap",
  "serde",
  "serde_json",
 ]
