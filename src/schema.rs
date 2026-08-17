@@ -408,6 +408,13 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                     }
                 }
 
+                // 3b. Daemon cost model (idle-cost-model.md) — per-daemon not per-session
+                md.push_str("### 🔥 Daemon Cost (blazing-fast at 200 agents)\n\n");
+                md.push_str(&format!(
+                    "> **Model:** `cores = 0.116 + 0.0104·owned + 0.000337·rows` (R² 0.939). Single shared daemon ≈ `0.45` cores for 23 sessions vs `3.0` cores across 14 daemons for 34 sessions — **4.5× cheaper per session when shared.** Kernel `2.58` cores of daemon work is the dominant term, GUI is `0.01` cores.\n\n\
+                    > *Probe tip for agents:* `yggterm-headless server perf-summary --category render --top 5 --json` + `server perf-incidents --list` (never `ps %CPU`). Ytop fan-out reuses `ControlMaster` (45s) so 3-host read <1s. `eBPF` ring (`bpftrace`/`perf`) is Slice 2 opt-in per Yggdrasil host.\n\n"
+                ));
+
                 // 4. LXC Containers
                 let containers = p["containers"].as_array().cloned().unwrap_or_default();
                 if !containers.is_empty() {
