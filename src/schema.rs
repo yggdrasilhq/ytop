@@ -422,11 +422,22 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
                         }
                     }
+                    // Pagination chrome: prev/next when notebook has >1 pages, plus back to shelf.
+                    let page_idx = nb.pages.iter().position(|p| &p.id == page_id).unwrap_or(0);
+                    let mut footer = Vec::new();
+                    if page_idx > 0 {
+                        footer.push(json!({"kind": "button", "id": format!("page_prev:{}", nb.id), "action": format!("page_open:{}:{}", nb.id, page_idx - 1), "label": "← Prev"}));
+                    }
+                    if page_idx + 1 < nb.pages.len() {
+                        footer.push(json!({"kind": "button", "id": format!("page_next:{}", nb.id), "action": format!("page_open:{}:{}", nb.id, page_idx + 1), "label": "Next →"}));
+                    } else {
+                        footer.push(json!({"kind": "button", "id": "book_back", "action": "refresh", "label": "← Back to shelf"}));
+                    }
                     return json!({
-                        "title": format!("📖 {} — {}", nb.title, page.title),
+                        "title": format!("📖 {} — {}  ({} / {})", nb.title, page.title, page_idx + 1, nb.pages.len()),
                         "titlebar_switch": titlebar_switch_spec(&view.mode),
                         "widgets": widgets,
-                        "footer": [json!({"kind": "button", "id": "next_page", "action": "refresh", "label": "Next →"})]
+                        "footer": footer
                     });
                 }
             }
