@@ -388,8 +388,32 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                     if nb.mode == "dash" && page.has_ytrace() {
                         // Inline ytrace preview — latest query summary if available locally
                         if let Some(q) = page.ytrace_queries.first() {
-                            let home = ytrace::compat::resolve_home(&q.provider);
-                            let sums = ytrace::query::summarize(&home, Some(&q.category), Some(chrono_like_now_ms() - q.since_ms as u128));
+                            // For yggterm, ytrace writes to XDG but compat prefers legacy — read both and merge.
+                            let homes = {
+                                let mut hs = vec![ytrace::compat::resolve_home(&q.provider)];
+                                if q.provider == "yggterm" {
+                                    if let Some(xdg) = dirs::home_dir().map(|h| h.join(".local").join("share").join("ytrace").join("yggterm")) {
+                                        if xdg != hs[0] && xdg.exists() {
+                                            hs.push(xdg);
+                                        }
+                                    }
+                                    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+                                        let p = std::path::PathBuf::from(xdg).join("ytrace").join("yggterm");
+                                        if !hs.contains(&p) && p.exists() {
+                                            hs.push(p);
+                                        }
+                                    }
+                                }
+                                hs
+                            };
+                            let mut sums = Vec::new();
+                            let since = Some(chrono_like_now_ms() - q.since_ms as u128);
+                            for home in &homes {
+                                sums.extend(ytrace::query::summarize(home, Some(&q.category), since));
+                            }
+                            // merge by (category,name,clock) summing counts like query does per home, but simple: dedupe by probe and sum
+                            sums.sort_by(|a, b| b.total_ms.partial_cmp(&a.total_ms).unwrap());
+                            sums.truncate(6);
                             let mut md = String::from("## ytrace sample (local) — file-first, not ps\n\n| probe | count | total | p50 | p95 |\n| :--- | :--- | :--- | :--- | :--- |\n");
                             for s in sums.iter().take(6) {
                                 md.push_str(&format!("| `{}/{}` | {} | {:.1} ms | {:.1} ms | {:.1} ms |\n", s.category, s.name, s.count, s.total_ms, s.p50_ms, s.p95_ms));

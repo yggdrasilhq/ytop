@@ -320,6 +320,40 @@ for _t in ["bpftrace", "perf", "bpftool"]:
         ebpf_tools.append(_t)
 ebpf_available = len(ebpf_tools) > 0
 
+# ytrace discovery — file-first, no daemon needed (Dash exclusively ytrace)
+ytrace_info = {"has_ytrace": False, "providers": []}
+try:
+    import glob as _glob
+    _xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    _seen = []
+    for _pat in [os.path.join(_xdg, "ytrace", "*", "ytrace.jsonl"), os.path.join(os.path.expanduser("~/.yggterm"), "ytrace.jsonl")]:
+        for _p in _glob.glob(_pat):
+            try:
+                _sz = os.path.getsize(_p)
+                _root = os.path.dirname(_p)
+                _app = os.path.basename(_root) if _root != os.path.expanduser("~/.yggterm") else "yggterm"
+                if _app == "ytrace":
+                    _app = "yggterm"
+                _seen.append({"app": _app, "home": _root, "live_bytes": _sz})
+            except Exception:
+                pass
+    _yh = os.environ.get("YTRACE_HOME")
+    if _yh:
+        for _p in _glob.glob(os.path.join(_yh, "*", "ytrace.jsonl")):
+            try:
+                _sz = os.path.getsize(_p)
+                _root = os.path.dirname(_p)
+                _app = os.path.basename(_root)
+                _seen.append({"app": _app, "home": _root, "live_bytes": _sz})
+            except Exception:
+                pass
+    if _seen:
+        # keep distinct homes, not just app (yggterm has XDG and legacy)
+        ytrace_info["providers"] = _seen
+        ytrace_info["has_ytrace"] = True
+except Exception:
+    pass
+
 uptime = read("/proc/uptime").split()
 print(json.dumps({
     "ok": True,
@@ -345,6 +379,7 @@ print(json.dumps({
     "cpu_busy_pct": round(sum(p for _, p in rows), 1),
     "top": top,
     "sample_ms": round(elapsed * 1000),
+    "ytrace": ytrace_info,
 }))
 "#;
 
