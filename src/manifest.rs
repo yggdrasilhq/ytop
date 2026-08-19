@@ -1,10 +1,11 @@
-//! ytop dash's LAUNCHER MANIFEST — how the yggterm menus learn ytop dash exists.
+//! ytop's LAUNCHER MANIFEST — how the yggterm menus learn ytop exists.
 //!
 //! Written to `~/.yggterm/apps/ytop.json` on the app's OWN host on every
 //! run, which repairs the binary path after an upgrade. The host's daemon scans
 //! the directory and deletes manifests whose binary is gone — that is the whole
 //! uninstall story. An app declares itself with a FILE, not by linking the
 //! platform.
+//! Formerly `yggtopo.json` — that file is removed on upgrade.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -13,18 +14,21 @@ use std::path::{Path, PathBuf};
 fn manifest_value(binary: &Path) -> Value {
     json!({
         "name": "ytop",
-        "label": "Ytop Dash",
-        "icon": "🌳\u{fe0e}",
+        "label": "Ytop",
+        "icon": "📊\u{fe0e}",
         "binary": binary.to_string_lossy(),
         "verbs": [
             { "id": "open", "label": "Fleet topology", "args": [] },
             { "id": "booter", "label": "Fleet booter", "args": ["--tab", "booter"] },
+            { "id": "dash", "label": "Dash notebooks", "args": ["--tab", "dash"] },
         ],
     })
 }
 
 fn write_to(apps_dir: &Path, binary: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(apps_dir)?;
+    // Remove stale yggtopo manifest (one-release compat).
+    let _ = std::fs::remove_file(apps_dir.join("yggtopo.json"));
     let path = apps_dir.join("ytop.json");
     std::fs::write(&path, serde_json::to_string_pretty(&manifest_value(binary))?)?;
     Ok(path)
@@ -46,6 +50,6 @@ mod tests {
         let value = manifest_value(Path::new("/usr/local/bin/ytop"));
         assert_eq!(value["name"], "ytop");
         assert!(value["binary"].as_str().unwrap().starts_with('/'));
-        assert_eq!(value["verbs"].as_array().unwrap().len(), 2);
+        assert_eq!(value["verbs"].as_array().unwrap().len(), 3);
     }
 }

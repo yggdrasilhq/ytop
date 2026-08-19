@@ -1,8 +1,11 @@
-# ytop dash
+# ytop
 
-**`lstopo` + `htop`, for a yggterm fleet.** The machines, the containers they
-host, and what is actually burning them right now — as one view. Plus an off
-switch for the fleet's watchdog.
+**`lstopo` + `htop` + DTrace notebooks, for a yggterm fleet.** The machines, the containers they
+host, and what is actually burning them right now — plus notebooks that read **ytrace** probes from `yggterm`, `ychrome`, and any app that embeds `ytrace`. Formerly `yggtopo` — that name now resolves to `ytop`.
+
+> **One `ytop` sees five planes at once:** the server machine(s), the client machine you’re looking from, the `yggterm` terminal fleet, the `ychrome` browser surface, and the webapp in the viewport. A hitch in the app’s `fetch` span, a `render/gui` storm, a `zfs_delay` outlier, and a `media_capture` prompt all land as the same `ytrace` record kind, queried the same way, in the same notebook — so a frontend jank is correlated to a ZFS commit without switching tools.
+
+It ships **base notebooks for both Top and Dash — a few per mode as needed, not one each.** Top includes fleet topology + fleet rows + booter/monitor; Dash includes `daemon_request` hot paths + `render` storms + `attach`/`session`/`usability` and `ychrome/web` traces. Every underlying probe is a `ytrace` span/event/metric/incident, so `ytrace` replaces all hand-rolled probing and `ytop` is the only reader you need.
 
 It is a [libyggterm](https://github.com/yggdrasilhq/libyggterm) document-surface
 app: it ships **no UI code**. It declares a widget schema over the terminal's own
@@ -14,7 +17,7 @@ Outside yggterm it is a plain CLI that prints the same reading, because an app
 that can only exist inside a GUI cannot be checked without one.
 
 ```
-$ ytop dash --once
+$ ytop --once
 
 alpha · 16 × Example CPU E1 · kernel 9.9.9-invented
   ├─ alpha          55.2% cpu    659 procs  (none)
@@ -44,7 +47,7 @@ distinct machines booting in the same second cannot collide.
 ⛔ **`ps %CPU` is a lifetime average** — total CPU over total age — so a process
 that burned a core for an hour and has slept since reads as busy forever, and
 one that started spinning ten seconds ago reads as idle. A view built on it is a
-biography, not a live view. ytop dash samples `/proc/<pid>/stat` twice and reports
+biography, not a live view. ytop samples `/proc/<pid>/stat` twice and reports
 the delta, which is what htop actually does.
 
 **Booter.** Who is armed, when they are due, and the switch that turns it off.
@@ -52,7 +55,7 @@ The fleet's booter is a watchdog that kicks stalled agent sessions; it could
 always be stood down by someone with a shell on the right machine who knew the
 verb, which is not an off switch but a rumour of one.
 
-⛔ **ytop dash re-implements none of it.** Every read is `ygg-booter.py … --json`
+⛔ **ytop re-implements none of it.** Every read is `ygg-booter.py … --json`
 and every write is one of its verbs. Two answers to "is the booter on right now"
 is the defect this pane exists to remove, not to double.
 
@@ -70,6 +73,12 @@ These are the ones that changed the code, not just the prose:
 - **A watcher that is alive but ticking into a closed log is never drawn as
   healthy.** Alive is not audible.
 
+## ytrace notebooks
+
+`ytop` in **Top mode** is the Linux tooling AXIOM — `ytrace` probes for `host/cpu_delta` (the delta `ps %CPU` hides), `host/zfs` (`zpool iostat`, `arcstat`, `zil_commit`), `host/ebpf` (`sched_switch`, `io_uring`, `zfs_delay`).
+
+`ytop` in **Dash mode** is the DTrace notebook — `ytrace query --app <app> --category <cat> --since <window> --top N` tables + `tail` timeline + `incidents` ranked by `trigger`. It goes beyond Chrome DevTools because it sees cross-process, cross-host spans (`web/policy` fetch, `SurfacePolicyGate::Pending`, `ssh -L` vs `ssh -D`).
+
 ## Building
 
 ```
@@ -81,9 +90,9 @@ cargo test
 
 | | |
 |---|---|
-| `~/.ytop/hosts` | extra ssh aliases, one per line. **Extends** the roster yggterm already knows; it never replaces it, so adding one line cannot silently hide the rest. Legacy `~/.yggtopo/hosts` still read. |
-| `YTOP_REFRESH_SECS` | how often the machines are re-read (default 2). This is an ssh fan-out, not a local read — a bigger fleet on a slower link wants a bigger number. Legacy `YGGTOPO_REFRESH_SECS` still honoured. |
-| `YTOP_BOOTER` | path to `ygg-booter.py`. Otherwise taken from the running watcher's own command line, and failing that from the conventional checkout path. Legacy `YGGTOPO_BOOTER` still honoured. |
+| `~/.ytop/hosts` (compat `~/.yggtopo/hosts`) | extra ssh aliases, one per line. **Extends** the roster yggterm already knows; it never replaces it, so adding one line cannot silently hide the rest. |
+| `YTOP_REFRESH_SECS` (compat `YGGTOPO_REFRESH_SECS`) | how often the machines are re-read (default 2). This is an ssh fan-out, not a local read — a bigger fleet on a slower link wants a bigger number. |
+| `YTOP_BOOTER` (compat `YGGTOPO_BOOTER`) | path to `ygg-booter.py`. Otherwise taken from the running watcher's own command line, and failing that from the conventional checkout path. |
 
 No agent is installed on the machines it reads: the probe is sent over ssh on
 stdin and run there, so a freshly added host works with no deployment.
