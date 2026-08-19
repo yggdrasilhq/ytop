@@ -197,12 +197,12 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
-        // Dash — exclusively ytrace: common bugs (render storm + session-only branch)
+        // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles)
         Notebook {
             id: "dash-common-bugs".to_string(),
-            title: "Common Bugs — session-only rehydrate + render storm".to_string(),
+            title: "Common Bugs — session-only rehydrate + render storm + titles".to_string(),
             mode: "dash".to_string(),
-            description: "The session-only branch that starved keyboard+viewport (one `return` without seed) and the unpinned 54–64 renders/s storm — both now ytrace-mirrored for Dash.".to_string(),
+            description: "The session-only branch that starved keyboard+viewport, the unpinned 54–64 renders/s storm, and titles that must never be shorthash/generic — all now ytrace-mirrored for Dash.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
@@ -245,6 +245,26 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("sparkline".to_string()),
+                },
+                Page {
+                    id: "dash-common-p3".to_string(),
+                    title: "3. Titles never shorthash — CLI store → LLM → untitled session → ytrace re-resolve".to_string(),
+                    markdown: "# Titles never shorthash\n\n> Titles must never be `43936dd` (bare hash) or generic `\"Muse Code Stays Attached Daemon\"` / `\"Local Shell Stay Alive Daemon\"`. Wire FROM the CLI store (`TitleAuthority::Store` for muse `session-index.db`, claude `custom-title`, codex `Generated`) and via interface LLM (`request_litellm_title` `gpt-5.6-luna`) when absent/bugged; if LLM fails, title is `\"untitled session\"` (never hash). `ytrace` then re-resolves untitled every tick (`daemon::background_copy_chore` emits `title/resolve_attempt` + `title/untitled_session` incident) until a real title lands — Dash sees the retry timeline without polling the DB.\n\nMuse lifecycle: new row → `\"New Muse Code Session\"` (explicit `set_session_title_explicit` at `terminal new`) → after first prompt `session.jsonl` has user turn → background chore `LIVE_SUMMARY_REFRESH_HORIZON` replaces via `heuristic_title_from_context()` / `request_litellm_title()` → `set_session_title_hint()`; shorthash/generic triggers same path, untitled triggers `ytrace` retry next tick because `\"untitled session\"` is itself a fallback per `titles.rs`.\n\nQuery: `ytrace tail --app yggterm --category title --since 1h --json | jq '.[] | select(.name==\"untitled_session\")'` and `ytrace query --app yggterm --category title --name resolve_attempt --since 1h`".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "title".to_string(),
+                            name: "untitled_session".to_string(),
+                            since_ms: 3600_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "title".to_string(),
+                            name: "resolve_attempt".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
                 },
             ],
         },
