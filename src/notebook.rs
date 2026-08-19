@@ -197,12 +197,12 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
-        // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles)
+        // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles + input + agy/codex)
         Notebook {
             id: "dash-common-bugs".to_string(),
-            title: "Common Bugs — session-only rehydrate + render storm + titles".to_string(),
+            title: "Common Bugs — session-only rehydrate + render storm + titles + input + agy/codex".to_string(),
             mode: "dash".to_string(),
-            description: "The session-only branch that starved keyboard+viewport, the unpinned 54–64 renders/s storm, and titles that must never be shorthash/generic — all now ytrace-mirrored for Dash.".to_string(),
+            description: "The session-only branch that starved keyboard+viewport, the unpinned 54–64 renders/s storm, titles that must never be shorthash/generic, input latency keystroke→pty→render, and agy/codex wiring vs Claude gold — all now ytrace-mirrored for Dash.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
@@ -261,6 +261,52 @@ fn base_notebooks() -> Vec<Notebook> {
                             provider: "yggterm".to_string(),
                             category: "title".to_string(),
                             name: "resolve_attempt".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                },
+                Page {
+                    id: "dash-common-p4".to_string(),
+                    title: "4. Input latency — keystroke → PTY → render".to_string(),
+                    markdown: "# Input latency\n\n> Every keystroke must be traceable end-to-end: `shell` `input/keystroke` (client has the bytes) → `daemon` `input/pty` (PTY `terminals.write` accepted) → `shell` `input/render` (`terminal_write_bridge.stage_or_immediate` staged for xterm). Each hop emits `ytrace` `input/*` (`Wall always`, `session_path`, `data_len`) so Dash can compute `pty - keystroke` and `render - pty` p50/p95 per session (like `render/storm` vs `daemon_request/status`). A stuck input gate (`remote_resume_input_ready` false) or lost PTY write (`terminal_write_error` → `recover_terminal_write_lost_runtime`) shows as `keystroke` without `pty`/`render` — the latency tail, not a screenshot, is the falsifier.\n\nProbes wired: `perf.rs: input/keystroke|pty|render` always; `viewport.rs:Input` emits `keystroke`, `daemon.rs:write_local_terminal_with_lost_runtime_recovery` emits `pty`, `viewport.rs:terminal_write_bridge.stage_or_immediate` emits `render`. Query: `ytrace tail --category input --since 5m --json | jq 'group_by(.name) | map({name: .[0].name, count: length})'` to flush out bugs where `keystroke` ≫ `pty` or `render` lags >50 ms.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "input".to_string(),
+                            name: "keystroke".to_string(),
+                            since_ms: 300_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "input".to_string(),
+                            name: "pty".to_string(),
+                            since_ms: 300_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "input".to_string(),
+                            name: "render".to_string(),
+                            since_ms: 300_000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                },
+                Page {
+                    id: "dash-common-p5".to_string(),
+                    title: "5. Agy + all CLIs vs Claude gold, codex geometry".to_string(),
+                    markdown: "# Agy + all CLIs vs Claude gold, codex geometry\n\n> `claude-code` is gold: one file per session `~/.claude/projects/*/*.jsonl` (filename IS id), `TitleAuthority::Store` (`custom-title > ai-title`), `id_assigned_at_birth:false` but filename IS id, flag `--resume`. Every other CLI is probed against it:\n\n* **Agy** (`agy` `remote-agy://`/`agy-runtime://` `agy --conversation <id>`) — DB `~/.gemini/antigravity-cli/conversations/*.db` + `brain/*` + `history.jsonl`, `TitleAuthority::Store` (`conversation_summaries.title`). Faults like `muse`: shorthash/generic → `ytrace title/*` (now `cli/agy_title` `no_title_in_store` / `fallback:true` / `is_untitled` in `daemon.rs:collect_live_antigravity_title_syncs`), resume uses `agy-runtime://` + DB `conversation_id` (not row UUID) — verify `remote_runtime_agent_session_key(\"remote-agy://…\")` returns `agy-runtime://<internal-id>` or switch orphans PTY (same `muse` kick, now `ytrace cli/agy_resume`).\n* **Codex** (`remote-session://` historical + `codex-runtime://` `codex resume <id>`, `re_roots_with_cwd:true`) and `codex-litellm` (local-only) — `Generated` titles, store `~/.codex/sessions/**/rollout-*.jsonl` id inside file. Faults are viewport: **geometry squish** (daemon re-creates PTY at `120×36` after hot-update, `last_sent_*` stale-equal) → `viewport.rs:9837` repair now `ytrace cli/codex_geometry` (`stale_cols/rows`, `live_cols/rows`, `codex_squish_repair`); `pi`/`qwen`/`opencode`/`kimi`/`grok` etc. share same `muse`/`agy` title+resume checks (shorthash never shown, `resume` subcommand vs flag, `store_globs` per `AGENT_CLIS`, `re_roots_with_cwd` per arm). Check: `ytrace tail --category cli --since 1h --json | jq 'group_by(.name)'`.\n\nAll faults logged like Muse exemplar: matrix `docs/cli-integration.md` Issue 13/14/15 + this Dash p4/p5.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "cli".to_string(),
+                            name: "agy_title".to_string(),
+                            since_ms: 3600_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "cli".to_string(),
+                            name: "codex_geometry".to_string(),
                             since_ms: 3600_000,
                         },
                     ],
