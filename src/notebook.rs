@@ -197,6 +197,57 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Dash — exclusively ytrace: common bugs (render storm + session-only branch)
+        Notebook {
+            id: "dash-common-bugs".to_string(),
+            title: "Common Bugs — session-only rehydrate + render storm".to_string(),
+            mode: "dash".to_string(),
+            description: "The session-only branch that starved keyboard+viewport (one `return` without seed) and the unpinned 54–64 renders/s storm — both now ytrace-mirrored for Dash.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-common-p1".to_string(),
+                    title: "1. The session-only branch".to_string(),
+                    markdown: "# The session-only branch\n\n> `retained_rehydrate_should_skip_before_read` returned early when the host was already live — no viewport seed, no `remote_resume_input_ready`. Plain shell never enters this path; agent session always does. The keyboard half is fixed; the paint half (`broken bottom`, `TUI breaks`) is the same branch.\n\n`viewport.rs` now mirrors the trace `ui/terminal_mount/retained_rehydrate_skipped_live_connected` (and `skipped_pre_resize` geometry fence) to ytrace, so Dash can count `skipped_live_connected` vs `skipped_pre_resize==0` in the current generation without tailing trace.\n\nQuery: `ytrace query --app yggterm --category terminal_mount --name retained_rehydrate_skipped_live_connected --since 1h` and correlate against faithful screenshots (`server app screenshot` canvas composite vs `server snapshot` `terminal_lines`). If they coincide, the fix is to seed the viewport on that branch instead of returning — same shape as releasing the input gate.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "retained_rehydrate_skipped_live_connected".to_string(),
+                            since_ms: 3600_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "retained_rehydrate_skipped_pre_resize".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                },
+                Page {
+                    id: "dash-common-p2".to_string(),
+                    title: "2. The render storm — 54–64 renders/s, one no-op ShellState write per frame".to_string(),
+                    markdown: "# The render storm\n\n> Measured on laptop 2026-08-14: `app_render_storm` — Dioxus root at **54–64 renders/s** (calm 0.7–1.2/s) pinning exactly one core for nine minutes, driven by **one `ShellState` write per render that changes no watched field**. Daemon event rate FLAT (13.1/s storming vs 12.1/s calm) — not \"58 rows re-attaching\", but a per-frame write that should not wake the root.\n\n`launch.rs` now emits both `ui/perf/app_render_rate` (every 60 s → `renders_per_sec`) and `render/storm` incident + `ui/render_fail_pattern/detected` `app_render_storm` to ytrace (Wall, always, no sampling), so Dash sees the storm without needing `render_top` deltas.\n\nQuery: `ytrace query --app yggterm --category render --name storm --since 1h` and `ytrace query --app yggterm --category ui --name app_render_rate --since 1h --top 5`; compare `renders_per_sec` trace vs `ytrace query` counts, and run deterministic `mock-tui codex-inline` + `pipeline_integration` harness on dev (never jojo) to repro the single-branch rehydrate skip without touching the live viewport.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "render".to_string(),
+                            name: "storm".to_string(),
+                            since_ms: 3600_000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "ui".to_string(),
+                            name: "app_render_rate".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("sparkline".to_string()),
+                },
+            ],
+        },
     ]
 }
 
