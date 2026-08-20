@@ -68,8 +68,8 @@ fn base_notebooks() -> Vec<Notebook> {
     vec![
         // Top — no ytrace (host atlas)
         Notebook {
-            id: "top-atlas-jojo".to_string(),
-            title: "Host Atlas — jojo at 53 rows".to_string(),
+            id: "top-atlas-client".to_string(),
+            title: "Host Atlas — a client host at 53 rows".to_string(),
             mode: "top".to_string(),
             description: "Top wants no ytrace — host, ZFS, LXC. Read like an atlas.".to_string(),
             author: "ytop".to_string(),
@@ -78,7 +78,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 Page {
                     id: "top-atlas-p1".to_string(),
                     title: "1. The Machine".to_string(),
-                    markdown: "# Host Atlas — jojo\n\n> **Rule:** Top is host truth without ytrace. Dash is exclusively ytrace.\n\n| Atlas | Host |\n| :--- | :--- |\n| **jojo** | 53 live sessions, 2 plain shells (169×65), 11 %CPU load 0.72 |\n| **ZFS** | `zroot` + `zbulk` pools, `frag %` tells how scattered — `>80%` deserves balance |\n| **LXC** | `44 Total` — expand a container to see its top processes (PID/CPU/RSS) |\n\n`probe.rs` 400 ms `/proc` delta — total work across all cores, not `ps` lifetime.".to_string(),
+                    markdown: "# Host Atlas — a client host\n\n> **Rule:** Top is host truth without ytrace. Dash is exclusively ytrace.\n\n| Atlas | Host |\n| :--- | :--- |\n| **client** | 53 live sessions, 2 plain shells (169×65), 11 %CPU load 0.72 |\n| **ZFS** | `zroot` + `zbulk` pools, `frag %` tells how scattered — `>80%` deserves balance |\n| **LXC** | `44 Total` — expand a container to see its top processes (PID/CPU/RSS) |\n\n`probe.rs` 400 ms `/proc` delta — total work across all cores, not `ps` lifetime.".to_string(),
                     ytrace_queries: vec![],
                     chart: None,
                 },
@@ -229,7 +229,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 Page {
                     id: "dash-common-p2".to_string(),
                     title: "2. The render storm — 54–64 renders/s, one no-op ShellState write per frame".to_string(),
-                    markdown: "# The render storm\n\n> Measured on laptop 2026-08-14: `app_render_storm` — Dioxus root at **54–64 renders/s** (calm 0.7–1.2/s) pinning exactly one core for nine minutes, driven by **one `ShellState` write per render that changes no watched field**. Daemon event rate FLAT (13.1/s storming vs 12.1/s calm) — not \"58 rows re-attaching\", but a per-frame write that should not wake the root.\n\n`launch.rs` now emits both `ui/perf/app_render_rate` (every 60 s → `renders_per_sec`) and `render/storm` incident + `ui/render_fail_pattern/detected` `app_render_storm` to ytrace (Wall, always, no sampling), so Dash sees the storm without needing `render_top` deltas.\n\nQuery: `ytrace query --app yggterm --category render --name storm --since 1h` and `ytrace query --app yggterm --category ui --name app_render_rate --since 1h --top 5`; compare `renders_per_sec` trace vs `ytrace query` counts, and run deterministic `mock-tui codex-inline` + `pipeline_integration` harness on dev (never jojo) to repro the single-branch rehydrate skip without touching the live viewport.".to_string(),
+                    markdown: "# The render storm\n\n> Measured on a client host: `app_render_storm` — Dioxus root at **54–64 renders/s** (calm 0.7–1.2/s) pinning exactly one core for nine minutes, driven by **one `ShellState` write per render that changes no watched field**. Daemon event rate FLAT (13.1/s storming vs 12.1/s calm) — not \"58 rows re-attaching\", but a per-frame write that should not wake the root.\n\n`launch.rs` now emits both `ui/perf/app_render_rate` (every 60 s → `renders_per_sec`) and `render/storm` incident + `ui/render_fail_pattern/detected` `app_render_storm` to ytrace (Wall, always, no sampling), so Dash sees the storm without needing `render_top` deltas.\n\nQuery: `ytrace query --app yggterm --category render --name storm --since 1h` and `ytrace query --app yggterm --category ui --name app_render_rate --since 1h --top 5`; compare `renders_per_sec` trace vs `ytrace query` counts, and run deterministic `mock-tui codex-inline` + `pipeline_integration` harness on a compute host (never the client) to repro the single-branch rehydrate skip without touching the live viewport.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
                             provider: "yggterm".to_string(),

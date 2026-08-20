@@ -9,7 +9,7 @@ description: Compose ytop profiling notebooks — book pages in the sidebar (yed
 
 **Shipped base notebooks (code in `ytop/src/notebook.rs`):**
 
-* `top-atlas-jojo` (Top) — *Host Atlas — jojo at 53 rows* · 2 pages: The Machine, Frag & Provisioning — no `ytrace_queries`, only `probe.rs` 400 ms delta.
+* `top-atlas-client` (Top) — *Host Atlas — a client host at 53 rows* · 2 pages: The Machine, Frag & Provisioning — no `ytrace_queries`, only `probe.rs` 400 ms delta.
 * `dash-angry-gui` (Dash) — *The Angry GUI that wasn't — 50% vs 0.37 cores* · 3 pages: ps lied (ytrace `render/gui`), npm-cache 6.2G→146K (`daemon_request/status`), Fix & Verify
 * `dash-idle-cost` (Dash) — *Idle Cost floor — 0.2 cores per daemon* · 1 page: `daemon_request/hot_restart`
 

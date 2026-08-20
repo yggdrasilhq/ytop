@@ -341,7 +341,7 @@ pub fn probe_rows(host: Option<&str>, timeout: Duration) -> Option<FleetRowsRepo
 fn probe_yggterm_fallback() -> Option<FleetRowsReport> {
     // Live probe per diagnostics: server snapshot is the daemon ground truth
     // (live_sessions with terminal_lines), not relay seat-membership.
-    // Used when relay is empty (jojo) but daemon holds 50+ Live Sessions.
+    // Used when relay is empty on a client host but daemon holds 50+ Live Sessions.
     fn yggterm_bin() -> String {
         if let Ok(v) = std::env::var("YGGTERM_BIN") {
             if !v.trim().is_empty() { return v; }
