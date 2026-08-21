@@ -1,6 +1,6 @@
 # Spec: `ytop` — Modern Fleet Infrastructure & Agent Cockpit
 
-**Status:** PROPOSED (2026-08-15)  
+**Status:** PARTLY IMPLEMENTED (spec 2026-08-15; §2.5, §4.1 registry and §5.4 landed 2026-08-21)  
 **Target Repositories:** `ytop` (`~/gh/ytop`), `yggterm` (`~/gh/yggterm`), `libyggterm` (`~/gh/libyggterm`)
 
 ---
@@ -59,6 +59,28 @@ It provides a unified, real-time control plane across two fundamental operationa
 
 ---
 
+## 2.5. ⭐ EVERY VIEW IS A NOTEBOOK — `Overview` is the base one
+
+ytop previously had two kinds of surface: notebooks you could open, and a
+hardcoded dashboard that appeared when nothing was selected. That made the main
+view — the one people actually look at — the only view with **no name, no place
+on the shelf, and no way to refer to it**. You returned to it by deselecting,
+which is not navigation.
+
+- **`Overview` is an ordinary notebook**, pinned **first** on the shelf, present in
+  **both** modes, and selected on open. `Top` Overview is the host dashboard;
+  `Dash` Overview is the fleet dashboard.
+- **Its page is LIVE** (`Page.live = true`): composed from the current probe at
+  render time rather than read from stored `markdown`. The shelf keeps one
+  vocabulary while the numbers stay current. `live` defaults to `false`, so
+  notebooks written before it existed still load as paper.
+- **Overview is built in and cannot be shadowed** — a stored notebook claiming its
+  id is skipped at read, because the default view must always be reachable.
+- ⚠ **Both modes' Overview share one id.** A page must therefore be resolved by
+  MODE; resolving by id alone opens the Top page while standing in Dash.
+- ⚠ **The shelf pins Overview rather than sorting it.** Plain id ordering buried
+  the default view in the middle of its own shelf (`dash-angry-gui` < `overview`).
+
 ## 3. Top-Level Mode Architecture
 
 The application titlebar / header hosts the primary mode toggle:
@@ -72,8 +94,23 @@ The application titlebar / header hosts the primary mode toggle:
 ### 4.1. Connected Machines Sidebar & Persistent Machine Registry
 - **Sources of Machines**:
   1. Local machine (`local` / `alpha`).
-  2. Auto-discovered remote SSH sessions from live Yggterm daemon snapshots (`server daemons`).
+  2. Auto-discovered remote SSH sessions from **every** live Yggterm daemon
+     (`server daemons` → `server snapshot --endpoint` per daemon). ⚠ Asking only
+     the busiest daemon loses machines: a remote host is known to the daemon
+     holding ITS sessions, which is not necessarily the busiest one.
   3. Stored user configurations from `~/.yggterm/config/machines.json`.
+
+- **⛔ DISCOVERY REGISTERS; IT DOES NOT MERELY LIST.** Every discovered machine is
+  merged into the registry and stays there. The roster is *registry ∪ today's
+  discovery*, so a machine that has gone quiet is still probed and reports as
+  **unreachable** rather than disappearing from the topology. A machine that is
+  merely down and a machine that never existed must never look the same.
+
+- **⛔ MERGING NEVER CLOBBERS.** The operator's `label` and their `is_yggdrasil`
+  flag survive every rediscovery — they carry knowledge discovery does not have.
+  Auto-detection may **fill** an unset `is_yggdrasil` (a reading showing ZFS pools
+  or containers), but may **never clear** one: a probe that timed out once must not
+  demote a machine that is a hypervisor.
 - **`[ + Add SSH Machine ]` Action**:
   - Modal or inline card prompting for `SSH Alias / Host`, `Label`, and optional `Tags` (e.g. `is_yggdrasil_host: true`).
   - Persisted in structured JSON format under `~/.yggterm/config/machines.json`.
@@ -151,6 +188,19 @@ Dedicated diagnostic engine to explain and eliminate host lag:
 - **Never-Arm Ledger Editor**: View and toggle rows that must never be auto-woken.
 
 ---
+
+## 5.4. Row Titles — owned by yggterm, not by ytop
+
+Rows born from a launcher follow the birth-title convention
+**`New {Machine} {App}`**, implemented once in yggterm
+(`yggterm-core/src/birth_title.rs`). ⛔ ytop must NOT compose its own titles: the
+convention is one builder precisely because it was once two, and an app that
+re-derived it would restore the split.
+
+⚠ **Birth titles stamp at BIRTH.** Rows created before a build carrying the
+convention keep their old titles indefinitely — nothing re-titles an existing
+row. A screenshot showing stale titles is therefore not evidence that the
+convention is broken; check when the row was born and which build was deployed.
 
 ## 6. Widget Schema & YggUI Component Contract
 
