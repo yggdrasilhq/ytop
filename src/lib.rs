@@ -7,4 +7,5 @@ pub mod probe;
 pub mod rows;
 pub mod schema;
 pub mod server;
+pub mod sysinternals;
 pub mod timeline;

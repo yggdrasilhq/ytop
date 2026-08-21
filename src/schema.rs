@@ -97,7 +97,7 @@ pub fn plain_progress_bar(pct: f64, width: usize) -> String {
     format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), clamped)
 }
 
-fn spark_char(pct: f64) -> char {
+pub fn spark_char(pct: f64) -> char {
     match (pct.clamp(0.0, 100.0) / 12.5) as usize {
         0 => '▁', 1 => '▂', 2 => '▃', 3 => '▄', 4 => '▅', 5 => '▆', 6 => '▇', _ => '█',
     }
@@ -372,7 +372,12 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                         "label": format!("← Back to {}", if view.mode == MODE_TOP { "Top" } else { "Dash" }),
                         "action": "refresh",
                     }));
-                    let ytrace_badge = if page.has_ytrace() { " 🔬 ytrace" } else { " · host-only" };
+                    let ytrace_badge = match (page.has_ytrace(), page.live.is_some()) {
+                        (true, true) => " 🔬 ytrace · 🔴 live",
+                        (true, false) => " 🔬 ytrace",
+                        (false, true) => " 🔴 live",
+                        (false, false) => " · host-only",
+                    };
                     widgets.push(json!({
                         "kind": "markdown",
                         "id": format!("book_page:{}", page.id),
@@ -420,6 +425,16 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             }
                             if sums.is_empty() { md.push_str("| — | — | — | — | — |\n> *No ytrace records yet — run `yggterm` with ytrace or check `YTRACE_HOME`.*\n"); }
                             widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
+                        }
+                    }
+                    // ── The live half of the page ────────────────────────────
+                    // ⭐ A shipped page's prose is frozen at build time. When it
+                    //    names a live reading, ytop fills it here from the same
+                    //    files the CLIs read — so a supervision page shows the
+                    //    fleet as it is now rather than as it was when written.
+                    if let Some(kind) = page.live.as_deref() {
+                        for w in crate::sysinternals::live_widgets(kind, &page.id, report, false) {
+                            widgets.push(w);
                         }
                     }
                     // Pagination chrome: prev/next when notebook has >1 pages, plus back to shelf.

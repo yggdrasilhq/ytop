@@ -3,7 +3,7 @@
 //! `GET /ping` (liveness + change stamp), `GET /pane/<id>` (the rich Dioxus schema),
 //! `POST /action` (all interactive actions: mode toggle, container uncollapse, jank cleanup, supervision).
 
-use crate::{booter, fleet, probe, rows, schema, timeline};
+use crate::{booter, fleet, notebook, probe, rows, schema, timeline};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -295,6 +295,7 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                         markdown,
                         ytrace_queries,
                         chart,
+                        live: pv.get("live").and_then(Value::as_str).map(|s| s.to_string()),
                     })
                 }).collect();
                 let nb = crate::notebook::Notebook {
@@ -311,6 +312,7 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                             markdown: format!("# {title}\n\nComposed via ytop skill on host `{}`.", pane.view.selected_host),
                             ytrace_queries: vec![],
                             chart: None,
+                            live: None,
                         }]
                     } else { pages },
                 };
@@ -341,6 +343,72 @@ fn respond(mut stream: TcpStream, status: u16, body: &Value) {
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(payload.as_bytes());
     let _ = stream.flush();
+}
+
+/// Print a notebook, or one of its pages, with its live blocks filled in.
+///
+/// ⛔ THE REPORT IS READ FROM THIS HOST ONLY, and the page says so. The GUI's
+/// census fans out over ssh; doing that from a CLI check would make a cheap
+/// verification into a fleet-wide one, and a slow instrument gets run less
+/// often than a fast one — which is the failure that matters here.
+pub fn print_notebook(id: &str, page: Option<usize>) -> Result<()> {
+    if id.is_empty() {
+        for nb in notebook::list_notebooks(None) {
+            println!("{:<22} [{:<4}] {:<2} page(s)  {}", nb.id, nb.mode, nb.pages.len(), nb.title);
+        }
+        return Ok(());
+    }
+    let Some(nb) = notebook::get_notebook(id) else {
+        anyhow::bail!("no notebook `{id}` — run `ytop --notebook` to list the shelf");
+    };
+
+    let Some(n) = page else {
+        println!("📖 {}  [{}]\n{}\n", nb.title, nb.mode, nb.description);
+        for (idx, p) in nb.pages.iter().enumerate() {
+            let mut marks = Vec::new();
+            if p.has_ytrace() {
+                marks.push("🔬 ytrace".to_string());
+            }
+            if let Some(l) = &p.live {
+                marks.push(format!("🔴 live:{l}"));
+            }
+            println!("  {}. {}   {}", idx + 1, p.title, marks.join(" · "));
+        }
+        println!("\nOne page: ytop --notebook {} --page 1", nb.id);
+        return Ok(());
+    };
+    let Some(p) = n.checked_sub(1).and_then(|i| nb.pages.get(i)) else {
+        anyhow::bail!("notebook `{}` has {} page(s); asked for {n}", nb.id, nb.pages.len());
+    };
+
+    println!("{}\n", p.markdown);
+    if p.has_ytrace() {
+        let qs: Vec<String> = p
+            .ytrace_queries
+            .iter()
+            .map(|q| format!("ytrace query --app {} --category {} --name {} --since {}s", q.provider, q.category, q.name, q.since_ms / 1000))
+            .collect();
+        println!("---\n\n**ytrace on this page** (chart `{}`):\n", p.chart.as_deref().unwrap_or("—"));
+        for q in qs {
+            println!("    {q}");
+        }
+        println!();
+    }
+    if let Some(kind) = &p.live {
+        // ⛔ `unwrap_or_default()` here is a real risk and the blocks are written
+        //    for it: a probe that failed becomes an EMPTY report, which every
+        //    live block must render as "nothing could be read" rather than as a
+        //    fleet with no seats in it.
+        let report = rows::probe_rows(None, std::time::Duration::from_secs(20)).unwrap_or_default();
+        println!("---\n");
+        for w in crate::sysinternals::live_widgets(kind, &p.id, &report, true) {
+            if let Some(src) = w["source"].as_str() {
+                println!("{src}");
+            }
+        }
+        println!("\n> This block was read on this host alone. The GUI's census fans out across the fleet;\n> a seat that lives on another machine is absent here, which is not the same as absent.");
+    }
+    Ok(())
 }
 
 pub fn print_once(mode: &str, as_json: bool) -> Result<()> {
