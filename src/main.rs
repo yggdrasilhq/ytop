@@ -2,6 +2,7 @@
 
 mod booter;
 mod fleet;
+mod legendary;
 mod manifest;
 mod notebook;
 mod osc;

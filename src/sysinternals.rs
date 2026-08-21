@@ -1116,9 +1116,18 @@ pub fn live_widgets(kind: &str, page_id: &str, report: &FleetRowsReport, blockin
         "cold" => cold_md(report),
         "rolls" => rolls_md(),
         "folds" => folds_md(),
-        other => format!(
-            "> ⛔ This page asked for a live reading called `{other}`, and this build has no reader by that name. The prose above still stands; the numbers that belong here are missing, which is not the same as being zero."
-        ),
+        // The Legendary Bugs blocks live in their own module: they share this
+        // dispatcher rather than a second one, so a page names a reading and
+        // does not have to know which file serves it.
+        //
+        // ⛔ Matched with `if let`, not a guard — a guard calling `block()` to
+        //    test it and again to use it would do every trace read twice.
+        other => match crate::legendary::block(other, blocking) {
+            Some(md) => md,
+            None => format!(
+                "> ⛔ This page asked for a live reading called `{other}`, and this build has no reader by that name. The prose above still stands; the numbers that belong here are missing, which is not the same as being zero."
+            ),
+        },
     };
     vec![json!({
         "kind": "markdown",

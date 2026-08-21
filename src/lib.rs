@@ -1,5 +1,6 @@
 pub mod booter;
 pub mod fleet;
+pub mod legendary;
 pub mod manifest;
 pub mod notebook;
 pub mod osc;

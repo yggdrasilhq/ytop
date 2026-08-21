@@ -486,6 +486,157 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Top — Legendary Bugs, the kernel half.
+        Notebook {
+            id: "top-legendary-bugs".to_string(),
+            title: "Legendary Bugs — the kernel half".to_string(),
+            mode: "top".to_string(),
+            description: "LEGENDARY is an owner-set priority: a defect that makes the product unusable. This shelf carries the kernel end of the chain — the processes a mount creates, the pressure it completes under, and ⛔ the kernel-call probe that is detected and never run.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "top-legendary-p1".to_string(),
+                    title: "1. What LEGENDARY means, and the chain".to_string(),
+                    markdown: "# Legendary Bugs — the kernel half\n\n**LEGENDARY is a priority, not a status.** It marks a defect that makes the product unusable for the\nperson using it, and it outranks every other open entry however tractable those are. A lane may not\npark a LEGENDARY item behind easier work, and an entry becomes or stops being LEGENDARY only on the\nowner's word.\n\nThis book has two halves because the bug does. The chain a keystroke and a glyph travel is\n\n    kernel → daemon → client → xterm.js → pixel\n\nand it is instrumented by five different layers that have never been read in one place — so each\ninvestigation re-derives it from a trace file, gets as far as its own layer, and files something the\nnext one cannot build on. **This shelf carries the kernel end.** Its twin on the Dash shelf,\n*Legendary Bugs — the yggterm half*, carries the rest.\n\n## ⛔ The rule that shapes every page in both halves\n\n**A missing probe and a quiet system look identical.** A page rendering `0` for a link nobody ever\ninstrumented is not reporting health — it is reporting its own blindness in the costume of health,\nand this is the failure that keeps getting paid for. So every block distinguishes three states and\nnever collapses them into two:\n\n| | |\n| :--- | :--- |\n| ✅ **seen** | the probe exists and fired here, with a count |\n| ⚠ **named, not seen** | the probe exists and was silent — which may be good news |\n| ⛔ **no probe** | nothing would have recorded this even if it happened |\n\n## Why the kernel end is thinner than the yggterm end\n\nTwo reasons, and only one of them is a defect.\n\nThe **shelf rule** is that Top takes no ytrace at all: it reads `probe.rs`, a 400 ms `/proc` delta,\nand nothing else. That is deliberate. Top is host truth, and a host atlas that depended on an\napplication's own tracing would go blank exactly when that application did — which is the moment you\nneed it.\n\nThe **defect** is that ytop makes no kernel call of its own. It detects `bpftrace`, `perf` and\n`bpftool`, and never runs them. Links 1 and 2 of the chain are therefore *declared* rather than\nmeasured, and page 3 writes that out in full — because the difference between \"the kernel was quiet\"\nand \"nobody asked the kernel\" is the difference this whole book is about.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("chain_map".to_string()),
+                },
+                Page {
+                    id: "top-legendary-p2".to_string(),
+                    title: "2. The kernel half of a mount".to_string(),
+                    markdown: "# The kernel half of a mount\n\nWhen a row is re-mounted, something concrete happens on this machine: a PTY child is forked and\nexec'd, a terminal buffer is allocated, and the row's screen is read back from disk before a single\nglyph can be drawn. This page is what that costs, measured the only way this shelf is allowed to\nmeasure it.\n\n## What a 400 ms sampler can see, and what it cannot\n\nIt sees **pressure** — cores, load, memory, and the pool the read comes from — and pressure is\ngenuinely diagnostic here rather than background colour. A mount that has to complete on a loaded\nmachine takes longer to paint, and a longer interval between the old surface disappearing and the new\none arriving is precisely the **ghost frame** the Dash half measures. The two halves meet at that\nnumber.\n\n⛔ **It cannot see the mounts themselves.** A `/proc` walk every 400 ms cannot observe a process that\nlives 40 ms, and the fork/exec under a mount is that short. So a mount storm appears here as a raised\nfloor and never as individual events. The instrument that would see them is on the next page, and it\nis not installed.\n\n## Reading the process table\n\n`cpu` is a **sampled delta**, not a `ps` lifetime average. A process that burned a core an hour ago\nand has slept since reads calm here and busy in `ps` — the delta is the live view, `ps` is a\nbiography. That distinction is load-bearing for this particular bug: the churn is bursty, and a\nlifetime average smears a burst into invisibility.\n\n## The disk half\n\nA mount that replays a row's screen reads it from disk. A pool under load is therefore a slow mount,\nand a slow mount is a longer blank. That is why the storage numbers are on this page rather than\nfiled under housekeeping.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("kernel_half".to_string()),
+                },
+                Page {
+                    id: "top-legendary-p3".to_string(),
+                    title: "3. ⛔ The kernel-call probe is declared, not run".to_string(),
+                    markdown: "# ⛔ The kernel-call probe is declared, not run\n\nThe end-to-end tracing this notebook exists for begins with a kernel call. **ytop does not make one.**\nIt runs `which` against three tools and reports whether they are on `PATH`.\n\nThat is not a small distinction dressed up as one. `ebpf_available: true` renders as a healthy-looking\nfact, and it means only that a binary exists: no probe was attached, nothing was sampled, and not one\nkernel event has ever been recorded by this program. A reader who takes it for a measurement has been\nmisled by the pane rather than by the system — which is why this page spells it out instead of showing\na green chip.\n\n## What closing it would settle\n\nEach of these answers a question that is currently settled by inference, which is to say not settled:\n\n* **`sched_switch` on the client's UI thread** — is a freeze the application blocking, or the kernel\n  declining to schedule it? The `ui/block` probe on the Dash side records the *gap* and cannot say\n  which side of it was at fault, so every freeze investigation begins by guessing.\n* **`sched_process_fork` / `exec`** — how many processes a mount storm actually creates. This is the\n  one the 400 ms sampler structurally cannot answer, however long you watch it.\n* **`zfs_delay` and the block layer** — is a slow mount waiting on the pool, or on the daemon?\n* **`io_uring` submit and complete** — where a stalled write is parked.\n\n## ⚠ This is a gap in ytop, not in the fleet\n\nThe tools are installed on the hosts that have them. What is missing is anything in this program that\nruns one and files the result as a reading. Until that exists, **treat every zero on this shelf about\nkernel behaviour as ytop's silence rather than the kernel's** — and note that this page is itself the\nmodel for how the rest of the book reports a gap: name it, price it, and refuse to draw it as calm.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("ebpf_gap".to_string()),
+                },
+            ],
+        },
+        // Dash — Legendary Bugs, the yggterm half.
+        Notebook {
+            id: "dash-legendary-bugs".to_string(),
+            title: "Legendary Bugs — the yggterm half".to_string(),
+            mode: "dash".to_string(),
+            description: "The mount churn, the ladder a mount stops on, ghost frames and broken paint, input blocking — and the map of where the kernel→daemon→client→xterm.js→pixel chain has no probe at all, because a missing probe and a quiet system look identical.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-legendary-p1".to_string(),
+                    title: "1. The mount churn — rows nobody is looking at".to_string(),
+                    markdown: "# The mount churn\n\n**A row nobody is looking at is torn down and re-mounted, and a mount begins with an EMPTY surface.**\nThose two facts together are the mechanism behind \"the viewport went blank\": nothing has to fail for\nthe screen to be empty. The mount simply starts that way, and the row is being re-mounted for reasons\nthat have nothing to do with the person watching it.\n\nThe measurement that promoted this to LEGENDARY — one 1.3-minute window, those rows untouched:\n\n| what | count in 1.3 min |\n| :--- | ---: |\n| full mounts (`terminal_mount/begin`) | 5 |\n| `terminal_mount/bootstrap_reset` | 7 |\n| …of those, landing on a row nobody was looking at | 3 |\n| `session/request_terminal_launch_for_active_begin` | 13 |\n| distinct rows involved | 3 |\n\n⇒ roughly **one re-mount every twenty seconds**, on rows nobody had asked for.\n\n## ⭐ The narrowing: it tracks the row SET, not the clock\n\nThe churn is not a background loop on a timer. Over a longer window with the trace open, most\n`bootstrap_reset`s fell within six seconds of a **row-set change** — a `create_terminal` or a\n`remove_session`. A forty-one-second stretch in which nothing touched the row set produced **zero**\nresets, while the periodic snapshot refresh went on ticking throughout. That stretch is the control,\nand it rules the refresh out as a driver on its own.\n\n⛔ **And a falsifier that came back negative, kept because it narrows the target rather than widening\nit.** One `set_session_outline` into a quiet GUI, setting a value that was already set, produced no\nreset and no launch in the twelve seconds after. So it is not \"any app-control mutation\": an\n**attribute** change is free, and what costs a re-mount is the row **set** changing.\n\n⚠ **That makes ordinary housekeeping a cause of the symptom.** Folding finished rows, spawning lanes\nand reseating them are all row-set changes, so a session doing its job makes the window flash for as\nlong as it is working. That is not an argument for doing less of it — it is the reason this entry\noutranks everything else in the queue.\n\n## What the block below adds\n\nIt recomputes the correlation **here, on this host, in this window**, instead of repeating the numbers\nabove. A written measurement is evidence about the moment it was taken; the same measurement recomputed\nis evidence about now — and where the two disagree, that disagreement is the finding.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "bootstrap_reset".to_string(),
+                            since_ms: 21600000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "app_control".to_string(),
+                            name: "request_begin".to_string(),
+                            since_ms: 21600000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                    live: Some("churn".to_string()),
+                },
+                Page {
+                    id: "dash-legendary-p2".to_string(),
+                    title: "2. A mount begins empty — the ladder, and the rung it stops on".to_string(),
+                    markdown: "# The ladder a mount climbs\n\nA mount is not one event, it is a ladder: the surface is created empty, a terminal is ensured, a\nbootstrap is scheduled, a JS terminal object is created, xterm.js reports ready, a stream attaches,\nbytes arrive, and finally bytes arrive that are **not protocol noise**. Only that last rung means a\nperson has something to look at.\n\n⇒ So the useful question about a blank viewport is never *\"did it error\"* — usually nothing did. It\nis **how far up the ladder did it get**, and the drop between two rungs is where blank lives.\n\n## Why `first_meaningful_output` is the rung that matters\n\n`first_output` fires for the first bytes of any kind, and a terminal handshake is bytes. A mount can\nreach `first_output`, look entirely healthy in a trace, and still be showing an empty rectangle.\n`first_meaningful_output` is the one that separates \"the pipe is connected\" from \"there is something\non the screen\", and the gap between those two counts is the population of blank surfaces.\n\n## The recovery ladder underneath\n\nA second set of probes exists purely to notice a blank surface and fight it: settle-waits, snapshot\nreplays, poison recovery, resume recovery, forced reveals. They are not idle.\n\n⭐ **A busy recovery ladder is not reassurance.** It means blankness is being detected and contested\nrepeatedly, and lost often enough to matter. **Curing the churn removes the need for most of this\nmachinery; curing the machinery alone leaves the churn paying for it forever** — which is why the\ntarget moved from \"make the re-ask ladder converge\" to \"stop re-mounting rows nobody asked for\".".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "begin".to_string(),
+                            since_ms: 21600000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "first_meaningful_output".to_string(),
+                            since_ms: 21600000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                    live: Some("mount_ladder".to_string()),
+                },
+                Page {
+                    id: "dash-legendary-p3".to_string(),
+                    title: "3. Ghost frames and broken paint — the xterm.js half".to_string(),
+                    markdown: "# Ghost frames and broken paint\n\nTwo symptoms reported from the seat, both classed as **input-blocking** defects: ghost frames and\nfreezes while switching between rows, and TUI paint arriving broken on a switch.\n\nThey are recorded against the churn rather than as separate entries, because **a switch IS a mount**.\nA ghost frame is the previous row's surface still on screen while the new mount has not painted;\nbroken paint is a mount that painted partially. Both are what \"a mount begins with an empty surface\"\nlooks like to the eye rather than to a trace. ⚠ If they turn out to have independent roots they split\nout — but filing three entries for one symptom chain is what made this look half-fixed once already.\n\n## ⛔ A correction this page carries against the written entry\n\nThe entry records that the xterm.js half is the gap, and that a partially-painted frame and a fully\npainted one are indistinguishable. **On this host that is not so.** `xterm_render/frame_gap` carries\n`rows_painted` against `rows`, and `frame_window` carries `full_canvas_frames` against `count`. The\npaint layer *is* instrumented, and the block below counts partial paints directly.\n\n⇒ Which relocates the real gap. What is missing is not paint instrumentation but **the link from a\npainted frame back to the bytes that caused it** — a frame id carried from the write to the paint. Without\nit, a frame that painted the wrong thing and a frame that painted the right thing are identical.\n\n## ⛔ And one trap in the data itself\n\n`frame_gap` is **threshold-gated**: it only fires above a fixed gap. So it counts *late* frames and\ncan say nothing whatever about how many frames were on time, and dividing it by anything to get a\npercentage produces a number with no meaning. `frame_window` is the honest denominator — it is the\nperiodic rollup and fires regardless.\n\nA median late-frame gap of several hundred milliseconds is long enough for a person to see the\nprevious row's content sitting where the new one should be. That is the ghost, measured.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "xterm_render".to_string(),
+                            name: "frame_gap".to_string(),
+                            since_ms: 21600000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_js".to_string(),
+                            name: "xterm_write_flush".to_string(),
+                            since_ms: 21600000,
+                        },
+                    ],
+                    chart: Some("sparkline".to_string()),
+                    live: Some("paint_chain".to_string()),
+                },
+                Page {
+                    id: "dash-legendary-p4".to_string(),
+                    title: "4. Input blocking — the class both symptoms were filed under".to_string(),
+                    markdown: "# Input blocking\n\nGhost frames, freezes and broken TUI paint are all filed as **input-blocking** defects, and that is\nnot loose language. While the surface is wrong, typing into it is either impossible or unsafe — and a\nperson who cannot trust what is on screen stops typing, which is the product being unusable rather\nthan merely flawed.\n\n## The chain a keystroke should be traceable along\n\n`input/keystroke` (the client has the bytes) → `input/pty` (the write was accepted) → `input/render`\n(staged for xterm.js). Three hops, three probes, and in principle two latencies.\n\n⛔ **In practice they do not count the same population, and the block below says so when it detects\nit.** `input/pty` counts every write into a PTY, and on a fleet almost all of those are an agent's own\noutput rather than a person's fingers. So `pty ÷ keystroke` is not a delivery rate and the difference\nis not lost input. Computing an end-to-end keystroke latency needs a **keystroke id carried through to\nthe render that displays it**, which does not exist — and it is a much smaller change than it sounds.\n\n## What is actually holding the thread\n\n`ui/block` records the UI thread stalling long enough to be felt, with the last activity before the\ngap as its `subject`. The density matters more than any single spike: a rising tail precedes a freeze.\n\n⚠ **Some share of these blocks are `app_control/*` — agent probes, none of them the user's, and the\nblock below measures which share rather than asserting one: it moves with how many agents are\nlooking at the GUI at the time.** Every\nread an agent makes of the GUI is paid for in the typing latency of whoever is at the keyboard. That\nis why the standing instruction is to batch reads and prefer the trace file to a live probe, and why\nthis notebook's own blocks are cached and refreshed off-thread rather than drawn on every render.\n\n⛔ **A block with no subject is not an unimportant one.** It is one where the last activity before the\ngap went unrecorded — so it is precisely the block nobody can chase, and it is usually the largest\nbucket on the page.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "input".to_string(),
+                            name: "pty".to_string(),
+                            since_ms: 21600000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "ui".to_string(),
+                            name: "block".to_string(),
+                            since_ms: 21600000,
+                        },
+                    ],
+                    chart: Some("timeline".to_string()),
+                    live: Some("input_chain".to_string()),
+                },
+                Page {
+                    id: "dash-legendary-p5".to_string(),
+                    title: "5. ⛔ Where the chain has no probe".to_string(),
+                    markdown: "# Where the chain has no probe\n\nEvery other page in this book is a count. **This one is the map of what those counts can and cannot\nmean**, and it is the page the notebook exists for.\n\nThe claim behind end-to-end observability is that with tracing at this depth no bug survives — and it\nis true, *provided the probes are right*. The failure mode is not a wrong number; it is an absent\nprobe rendering as a confident zero. A quiet link and an uninstrumented link produce identical\nevidence, and only a map like this one tells them apart.\n\n## How to read the state column\n\n* ✅ **seen** — the probe exists and fired in this window, with a count. Trust the number.\n* ⚠ **named, not seen** — the probe exists in code and was silent. This may be good news, or it may\n  mean the feature never ran, or that retention already rolled the window away. Three different\n  things a zero cannot separate.\n* ⛔ **no probe** — nothing would have recorded this even if it happened. **No number on this row is\n  ever evidence of anything.**\n\n## The two gaps worth closing first, and they are both cheap\n\n**An origin field on activation.** Whether the *active* row also changes by itself is unestablished\nand must not be asserted either way: a person clicking between rows and an application-driven switch\nproduce an identical trace, so no instrument here separates them. Until an activation event carries\nits origin — user gesture or internal — every future investigation re-argues this from the same\nambiguous evidence and reaches the same non-conclusion.\n\n**A frame id from write to paint.** It closes the last measurable link, turning \"a frame was painted\"\ninto \"*this* frame showed *those* bytes\" — which is what distinguishes broken paint from a paint that\nnever happened.\n\n⛔ **The last link cannot be closed from inside the application at all.** Everything the trace can say\nis that the software believed it painted. Only a screenshot correlated to a frame id, or a camera,\nsays a person saw it — and the gap between those two is where a LEGENDARY bug lives, because it is\nexactly the gap between what the instruments report and what the person in the chair experiences.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "terminal_mount".to_string(),
+                            name: "js_ready".to_string(),
+                            since_ms: 21600000,
+                        },
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "xterm_render".to_string(),
+                            name: "frame_window".to_string(),
+                            since_ms: 21600000,
+                        },
+                    ],
+                    chart: Some("table".to_string()),
+                    live: Some("probe_gaps".to_string()),
+                },
+            ],
+        },
     ]
 }
 

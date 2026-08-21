@@ -14,6 +14,8 @@ description: Compose ytop profiling notebooks — book pages in the sidebar (yed
 * `dash-idle-cost` (Dash) — *Idle Cost floor — 0.2 cores per daemon* · 1 page: `daemon_request/hot_restart`
 * `dash-intelligent` (Dash) — *Intelligent Daemon* · 3 pages: the governor's verdict, where complaints live, self-diagnosis
 * `dash-common-bugs` (Dash) — *Common Bugs* · 5 pages: session-only rehydrate, render storm, titles, input latency, CLI matrix
+* `top-legendary-bugs` (Top) — *Legendary Bugs — the kernel half* · 3 pages: what LEGENDARY means and the chain, the kernel half of a mount, ⛔ the kernel-call probe that is detected and never run. No `ytrace_queries` — Top's rule — so its live blocks read `probe.rs` only.
+* `dash-legendary-bugs` (Dash) — *Legendary Bugs — the yggterm half* · 5 pages: the mount churn, the ladder a mount stops on, ghost frames and broken paint, input blocking, and ⛔ the map of where the chain has no probe.
 * `dash-sysinternals` (Dash) — *yggterm SysInternals* · 8 pages: the two arming planes, the seat census, when each watcher last fired, the graphs, and four dream-mode walkthroughs — **the first notebook with live blocks** (below).
 
 **Live blocks — the half of a page that is not frozen at build time.** A `Page` may carry
@@ -21,6 +23,19 @@ description: Compose ytop profiling notebooks — book pages in the sidebar (yed
 files the CLIs read. Readers in `ytop/src/sysinternals.rs`: `armings` (both subscription stores,
 joined by row id) · `census` (seats) · `watchers` (last-fired + cadence) · `graphs` (ytrace,
 bucketed) · `wakes` (the booter's own action column) · `cold` · `rolls` · `folds`.
+Readers in `ytop/src/legendary.rs`, reached through the same dispatcher: `chain_map` ·
+`kernel_half` · `ebpf_gap` (Top, `probe.rs` only) · `churn` · `mount_ladder` · `paint_chain` ·
+`input_chain` · `probe_gaps` (Dash, ytrace).
+
+⛔ **A MISSING PROBE AND A QUIET SYSTEM LOOK IDENTICAL** — the rule every Legendary page keeps, and
+the one worth copying into any new notebook. Three states, never two: ✅ **seen** (fired here, with
+a count) · ⚠ **named, not seen** (exists in code, silent — which may be good news) · ⛔ **no probe**
+(nothing would have recorded it even if it happened). A page rendering `0` for a link nobody
+instrumented is reporting its own blindness in the costume of health.
+
+⚠ **Two shelves, two notebooks, one subject.** `Legendary Bugs` is a pair — `top-legendary-bugs`
+and `dash-legendary-bugs` — because a `Notebook` carries one `mode` and the shelves are separate
+lists. Each page cross-references its twin. Nothing in the mechanism needed changing for it.
 
 ⛔ **Membership is a fact, dueness is a judgement.** A live block may render which rows are in which
 store and the fields those stores wrote; whether a one-plane row is a *gap* belongs to
