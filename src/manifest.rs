@@ -17,10 +17,25 @@ fn manifest_value(binary: &Path) -> Value {
         "label": "Ytop",
         "icon": "📊\u{fe0e}",
         "binary": binary.to_string_lossy(),
+        // ⛔ `row_spawn: false` on every verb, and it is not an oversight.
+        //
+        // yggterm's ROW context menu spawns a session and puts a row in the
+        // sidebar for it. ytop is a terminal-invoked TUI: none of these verbs is
+        // a session anyone wants a persistent sidebar row for, and offering them
+        // there gave the user rows for things that were never sessions. The app
+        // is the only party that can know this — yggterm would have to hardcode
+        // another app's name to guess it — so the manifest says so.
+        //
+        // ⚠ It removes them from the ROW menu ONLY. The titlebar `+` and the
+        // start page still offer all three, because opening a dashboard from
+        // there is exactly what those surfaces are for.
+        //
+        // The flag defaults to true, so this is an opt-out and older yggterm
+        // builds that do not know the field simply ignore it.
         "verbs": [
-            { "id": "open", "label": "Fleet topology", "args": [] },
-            { "id": "booter", "label": "Fleet booter", "args": ["--tab", "booter"] },
-            { "id": "dash", "label": "Dash notebooks", "args": ["--tab", "dash"] },
+            { "id": "open", "label": "Fleet topology", "args": [], "row_spawn": false },
+            { "id": "booter", "label": "Fleet booter", "args": ["--tab", "booter"], "row_spawn": false },
+            { "id": "dash", "label": "Dash notebooks", "args": ["--tab", "dash"], "row_spawn": false },
         ],
     })
 }
@@ -51,5 +66,21 @@ mod tests {
         assert_eq!(value["name"], "ytop");
         assert!(value["binary"].as_str().unwrap().starts_with('/'));
         assert_eq!(value["verbs"].as_array().unwrap().len(), 3);
+    }
+
+    /// ⛔ NONE of ytop's verbs is a session row. A row menu that offered them
+    /// gave the user sidebar rows for a TUI that was never a session, which is
+    /// what the flag exists to stop — and only this manifest can say so.
+    #[test]
+    fn no_verb_asks_to_become_a_sidebar_row() {
+        let value = manifest_value(Path::new("/usr/local/bin/ytop"));
+        for verb in value["verbs"].as_array().unwrap() {
+            assert_eq!(
+                verb["row_spawn"],
+                serde_json::json!(false),
+                "{} would spawn a row",
+                verb["id"],
+            );
+        }
     }
 }
