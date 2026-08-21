@@ -1,9 +1,11 @@
 pub mod booter;
+pub mod complaints;
 pub mod fleet;
 pub mod manifest;
 pub mod notebook;
 pub mod osc;
 pub mod probe;
+pub mod rate;
 pub mod rows;
 pub mod schema;
 pub mod server;
