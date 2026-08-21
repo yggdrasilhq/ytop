@@ -5,7 +5,7 @@
 //! Titlebar Switch: Dynamic app-driven Top ↔ Dash mode toggle.
 
 use crate::fleet::{self, Machine};
-use crate::rows::{FleetRowsReport, RowInfo};
+use crate::rows::FleetRowsReport;
 use serde_json::{json, Value};
 
 pub const MODE_TOP: &str = "top";

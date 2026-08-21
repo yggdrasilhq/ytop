@@ -412,10 +412,74 @@ pub fn print_notebook(id: &str, page: Option<usize>) -> Result<()> {
 }
 
 pub fn print_once(mode: &str, as_json: bool) -> Result<()> {
+/// The window every `--once` complaint view is read over.
+///
+/// Stated, bounded, and printed beside every number it produces. An unstated
+/// window is how a lifetime tally passes for a rate.
+const COMPLAINT_WINDOW: std::time::Duration = std::time::Duration::from_secs(3600);
+
+pub fn print_once(mode: &str, tab: &str, as_json: bool) -> Result<()> {
     if mode == schema::MODE_DASH {
         let report = rows::scan_all_hosts();
+        let (conditions, total_records) =
+            crate::complaints::read_live("yggterm", COMPLAINT_WINDOW);
         if as_json {
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            println!("{}", serde_json::to_string_pretty(&json!({
+                "tab": tab,
+                "rows": report,
+                "complaints": {
+                    "window_secs": COMPLAINT_WINDOW.as_secs(),
+                    "records": total_records,
+                    "conditions": conditions.iter().map(|c| json!({
+                        "incident_id": c.incident_id,
+                        "severity": c.severity,
+                        "samples": c.samples,
+                        "span_secs": c.span_secs,
+                        "emitters": c.emitters.iter().map(|(pid, ver, age)| json!({
+                            "pid": pid, "version": ver, "age_secs": age,
+                        })).collect::<Vec<_>>(),
+                        "diagnosis": c.diagnosis,
+                        "untrustworthy_fields": c.untrustworthy_fields().iter()
+                            .map(|(f, v)| json!({"field": f, "caveat": v.caveat()}))
+                            .collect::<Vec<_>>(),
+                        "climbing_levels": c.cumulative_fields(),
+                    })).collect::<Vec<_>>(),
+                },
+            }))?);
+            return Ok(());
+        }
+        // The complaint plane is what Dash is for; the tab chooses the lens.
+        if tab == "jankbox" {
+            println!("{}", crate::complaints::render(&conditions, total_records, COMPLAINT_WINDOW));
+            let j = &report.jankbox;
+            println!("  ── JANKBOX ────────────────────────────────────────────────────────────");
+            println!("  spinning subshells : {:?}", j.leaked_subshell_pids);
+            println!("  stale twin pids    : {:?}", j.twin_stale_pids);
+            println!("  total jank procs   : {}", j.total_jank_procs);
+            if j.bloated_transcripts_mb.is_empty() {
+                println!("  bloated transcripts: none");
+            } else {
+                println!("  bloated transcripts:");
+                for (uuid, mb) in &j.bloated_transcripts_mb {
+                    println!("      {uuid}  {mb:.1} MB");
+                }
+            }
+            return Ok(());
+        }
+        if tab == "supervision" {
+            println!("  ── SUPERVISION ────────────────────────────────────────────────────────");
+            match &report.quota_hold {
+                Some(h) => println!("  ⏸ QUOTA HOLD ACTIVE: {h}"),
+                None => println!("  quota hold: none"),
+            }
+            let mut by_state: std::collections::BTreeMap<&str, Vec<&str>> =
+                std::collections::BTreeMap::new();
+            for r in &report.rows {
+                by_state.entry(r.supervision_state.as_str()).or_default().push(&r.seat);
+            }
+            for (state, seats) in by_state {
+                println!("  {:<22} {:>3} row(s)  {}", state, seats.len(), seats.join(" "));
+            }
             return Ok(());
         }
         println!("==========================================================================================================");
@@ -452,6 +516,7 @@ pub fn print_once(mode: &str, as_json: bool) -> Result<()> {
             report.total_rows, report.live_count, report.total_agent_cpu_pct, report.total_agent_rss_mb, report.total_transcript_mb);
         println!("  Jankbox Leaks: {} spinning subshells  ·  Twin Duplicate Alarms: {}",
             report.leak_count, report.twin_count);
+        println!("{}", crate::complaints::render(&conditions, total_records, COMPLAINT_WINDOW));
         return Ok(());
     }
 

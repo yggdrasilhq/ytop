@@ -1,12 +1,14 @@
 //! ytop — `htop` + fleet agent rows + booter + ZFS/LXC topology, for a yggterm fleet.
 
 mod booter;
+mod complaints;
 mod fleet;
 mod legendary;
 mod manifest;
 mod notebook;
 mod osc;
 mod probe;
+mod rate;
 mod rows;
 mod schema;
 mod server;
@@ -33,7 +35,8 @@ struct Args {
     /// Operational mode: "top" (machines, ZFS, LXC) or "dash" (agent fleet & jankbox)
     #[arg(long, value_parser = ["top", "dash"], default_value = "top")]
     mode: String,
-    /// Dash subtab: "rows", "jankbox", or "supervision"
+    /// Dash subtab: "rows" (fleet table), "jankbox" (ytrace complaints +
+    /// leaked/twin processes), or "supervision" (arming and quota holds).
     #[arg(long, value_parser = ["rows", "jankbox", "supervision"], default_value = "rows")]
     tab: String,
     /// Print one reading and exit, even inside yggterm.
@@ -84,7 +87,7 @@ fn main() -> Result<()> {
                  printing one reading instead of opening a surface."
             );
         }
-        return server::print_once(&args.mode, args.json);
+        return server::print_once(&args.mode, &args.tab, args.json);
     }
 
     let control = server::spawn()?;
