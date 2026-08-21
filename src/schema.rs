@@ -373,7 +373,7 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
     {
         if let Some(nb) = crate::notebook::get_notebook(nb_id) {
             if let Some(page_id) = &view.selected_page {
-                if let Some(page) = nb.pages.iter().find(|p| &p.id == page_id && !p.live) {
+                if let Some(page) = nb.pages.iter().find(|p| &p.id == page_id && !p.composed) {
                     let mut widgets = Vec::new();
                     // Book chrome: back to dashboards
                     widgets.push(json!({

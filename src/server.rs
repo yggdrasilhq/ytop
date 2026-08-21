@@ -319,8 +319,8 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                         ytrace_queries,
                         chart,
                         live: pv.get("live").and_then(Value::as_str).map(|s| s.to_string()),
-                        // Agent-composed pages are paper, never a live window.
-                        live: false,
+                        // Agent-composed pages are paper, never a composed window.
+                        composed: false,
                     })
                 }).collect();
                 let nb = crate::notebook::Notebook {
@@ -437,7 +437,6 @@ pub fn print_notebook(id: &str, page: Option<usize>) -> Result<()> {
     Ok(())
 }
 
-pub fn print_once(mode: &str, as_json: bool) -> Result<()> {
 /// The window every `--once` complaint view is read over.
 ///
 /// Stated, bounded, and printed beside every number it produces. An unstated
