@@ -24,6 +24,13 @@ pub struct Page {
     pub markdown: String,
     pub ytrace_queries: Vec<YtraceQuery>,
     pub chart: Option<String>, // "sparkline" | "timeline" | "table"
+    /// A LIVE page is composed at render time from the current probe, not read
+    /// from `markdown`. Stored notebooks are paper; this one is a window.
+    ///
+    /// `markdown` still carries a description, so a live page in a listing, an
+    /// export, or a `--json` dump says what it shows rather than being blank.
+    #[serde(default)]
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,8 +71,71 @@ pub fn notebook_dir() -> std::path::PathBuf {
     std::path::PathBuf::from("/tmp/ytop-notebooks")
 }
 
+/// The notebook every mode opens on.
+///
+/// ⛔ THE DASHBOARD IS A NOTEBOOK, NOT A THING BESIDE THE NOTEBOOKS. ytop used
+/// to have two kinds of surface: a hardcoded dashboard that appeared when
+/// nothing was selected, and notebooks you could open. So the main view was the
+/// one view with no name, no place on the shelf, and no way to be referred to —
+/// you got back to it by deselecting, which is not navigation.
+///
+/// Overview closes that: it is an ordinary notebook, first on every shelf, and
+/// it is what both modes select on open. Its pages are LIVE — composed from the
+/// current probe at render time rather than read from stored markdown — so the
+/// shelf holds one vocabulary while the numbers stay current.
+pub const OVERVIEW_ID: &str = "overview";
+
+/// Whether an id names the Overview notebook, which is built in and never
+/// loaded from disk — a stored notebook must not be able to shadow it.
+pub fn is_overview(id: &str) -> bool {
+    id == OVERVIEW_ID
+}
+
+/// The Overview page id for a mode.
+pub fn overview_page_id(mode: &str) -> String {
+    format!("{OVERVIEW_ID}-{mode}")
+}
+
+fn overview_notebook(mode: &str) -> Notebook {
+    let (title, description, page_title, body) = if mode == "top" {
+        (
+            "Overview",
+            "The machines, live — host metrics, storage, containers and processes.",
+            "Host Overview",
+            "# Host Overview\n\n             A LIVE page: composed from the current probe each refresh, not stored.\n\n             Shows the selected machine's CPU, memory and swap gauges, its storage              pools and containers where it has them, and its heaviest processes.\n\n             Pick a machine in the rail to point this page at it. Every machine              yggterm has ever reported is registered and stays on that list, so one              that has gone quiet reads as unreachable rather than vanishing.",
+        )
+    } else {
+        (
+            "Overview",
+            "The fleet, live — agent rows, complaints, and what is leaking.",
+            "Fleet Overview",
+            "# Fleet Overview\n\n             A LIVE page: composed from the current probe each refresh, not stored.\n\n             Shows every agent row with its process liveness and transcript size,              the ytrace complaint plane rolled up by condition, and the jankbox —              leaked subshells, twinned processes, bloated cold transcripts.\n\n             Counts here are of CONDITIONS, not of samples: one thing that nothing              clears, re-sampled every minute, is one problem and not three hundred.",
+        )
+    };
+
+    Notebook {
+        id: OVERVIEW_ID.to_string(),
+        title: title.to_string(),
+        mode: mode.to_string(),
+        description: description.to_string(),
+        author: "ytop".to_string(),
+        created_at_ms: 0,
+        pages: vec![Page {
+            id: overview_page_id(mode),
+            title: page_title.to_string(),
+            markdown: body.to_string(),
+            ytrace_queries: vec![],
+            chart: None,
+            live: true,
+        }],
+    }
+}
+
 fn base_notebooks() -> Vec<Notebook> {
     vec![
+        // ⭐ Overview first, in both modes: it is what ytop opens on.
+        overview_notebook("top"),
+        overview_notebook("dash"),
         // Top — no ytrace (host atlas)
         Notebook {
             id: "top-atlas-client".to_string(),
@@ -81,6 +151,7 @@ fn base_notebooks() -> Vec<Notebook> {
                     markdown: "# Host Atlas — a client host\n\n> **Rule:** Top is host truth without ytrace. Dash is exclusively ytrace.\n\n| Atlas | Host |\n| :--- | :--- |\n| **client** | 53 live sessions, 2 plain shells (169×65), 11 %CPU load 0.72 |\n| **ZFS** | `zroot` + `zbulk` pools, `frag %` tells how scattered — `>80%` deserves balance |\n| **LXC** | `44 Total` — expand a container to see its top processes (PID/CPU/RSS) |\n\n`probe.rs` 400 ms `/proc` delta — total work across all cores, not `ps` lifetime.".to_string(),
                     ytrace_queries: vec![],
                     chart: None,
+                    live: false,
                 },
                 Page {
                     id: "top-atlas-p2".to_string(),
@@ -88,6 +159,7 @@ fn base_notebooks() -> Vec<Notebook> {
                     markdown: "## Frag & Provisioning\n\n> `npm-cache/_cacache 6.2G → 146K` — reclaimed 99.98% with `npm cache clean --force`.\n\nTop pages tell host stories without ytrace: how full, how scattered, how many daemons own the floor.".to_string(),
                     ytrace_queries: vec![],
                     chart: None,
+                    live: false,
                 },
             ],
         },
@@ -111,6 +183,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 60_000,
                     }],
                     chart: Some("sparkline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-angry-p2".to_string(),
@@ -123,6 +196,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 60_000,
                     }],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-angry-p3".to_string(),
@@ -130,6 +204,7 @@ fn base_notebooks() -> Vec<Notebook> {
                     markdown: "## Fix & Verify\n\n> `server app session remove local://a64c6ce9…` → `row_still_listed:false verified:false processes_survived` → `pgrep agy` empty → `tenants row_count 54→53`.\n\nClose the 0.85-core `agy --dangerously-skip-permissions` (`ytop verification` proof already landed `55e374a`). Verify with `viewport_force_log` + `ps delta`, not `ps` lifetime.\n\nNext profiling adventure: why `status` poll is 1.6% not N² — use ytrace to compose page 1.".to_string(),
                     ytrace_queries: vec![],
                     chart: None,
+                    live: false,
                 },
             ],
         },
@@ -152,6 +227,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 60_000,
                     }],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
             ],
         },
@@ -175,6 +251,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 60_000,
                     }],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-intelligent-p2".to_string(),
@@ -187,6 +264,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 300_000,
                     }],
                     chart: None,
+                    live: false,
                 },
                 Page {
                     id: "dash-intelligent-p3".to_string(),
@@ -194,6 +272,7 @@ fn base_notebooks() -> Vec<Notebook> {
                     markdown: "## Self-diagnosis playground\n\nTry it headlessly or via skill:\n\n```sh\nytrace incidents --app yggterm --since 5m --json | jq '.[].payload.diagnosis'\nytrace query --app yggterm --category daemon_request --name status --since 60s --top 5 --json\nytop --probe ytrace --json | jq .incidents\n# as an agent on any host:\n# POST /action notebook_compose_dash {\"title\":\"my incident\", \"ytrace_queries\":[...]}\n```\n\nThe book rule: **Top has no ytrace, Dash is exclusively ytrace.** Compose your profiling adventure as a Dash book page; `ytop --probe` is the discovery front door.".to_string(),
                     ytrace_queries: vec![],
                     chart: None,
+                    live: false,
                 },
             ],
         },
@@ -225,6 +304,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-common-p2".to_string(),
@@ -245,6 +325,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("sparkline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-common-p3".to_string(),
@@ -265,6 +346,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-common-p4".to_string(),
@@ -291,6 +373,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
                 Page {
                     id: "dash-common-p5".to_string(),
@@ -311,6 +394,7 @@ fn base_notebooks() -> Vec<Notebook> {
                         },
                     ],
                     chart: Some("timeline".to_string()),
+                    live: false,
                 },
             ],
         },
@@ -332,6 +416,11 @@ pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
             }
             if let Ok(data) = std::fs::read_to_string(&path) {
                 if let Ok(nb) = serde_json::from_str::<Notebook>(&data) {
+                    // ⛔ Overview is built in. A stored notebook claiming its id
+                    // would replace the one view that must always be reachable.
+                    if is_overview(&nb.id) {
+                        continue;
+                    }
                     // Top/Dash segregation: Top wants no ytrace, Dash exclusively ytrace — enforce at read.
                     let is_ytrace = nb.pages.iter().any(|p| p.has_ytrace());
                     let mode_ok = match (nb.mode.as_str(), mode_filter) {
@@ -349,8 +438,17 @@ pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
             }
         }
     }
-    // Stable sort: base first (by id), then user by created_at
-    out.sort_by(|a, b| a.mode.cmp(&b.mode).then(a.id.cmp(&b.id)));
+    // ⭐ Overview is pinned first; everything else sorts by (mode, id).
+    //
+    // Sorting on id alone put the shelf in alphabetical order, which buried the
+    // one notebook that is the default view somewhere in the middle of its own
+    // shelf — `dash-angry-gui` sorts before `overview`.
+    out.sort_by(|a, b| {
+        is_overview(&b.id)
+            .cmp(&is_overview(&a.id))
+            .then(a.mode.cmp(&b.mode))
+            .then(a.id.cmp(&b.id))
+    });
     out
 }
 
@@ -365,4 +463,104 @@ pub fn write_notebook(nb: &Notebook) -> anyhow::Result<std::path::PathBuf> {
     let data = serde_json::to_string_pretty(nb)?;
     std::fs::write(&path, data)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod overview_tests {
+    use super::*;
+
+    /// ⭐ The dashboard must be ON the shelf, not beside it — that is the whole
+    /// point of Overview, and it must exist in BOTH modes.
+    #[test]
+    fn overview_is_the_first_notebook_in_every_mode() {
+        for mode in ["top", "dash"] {
+            let shelf = list_notebooks(Some(mode));
+            assert!(!shelf.is_empty(), "{mode} shelf is empty");
+            assert!(
+                is_overview(&shelf[0].id),
+                "{mode} shelf does not open on Overview: {}",
+                shelf[0].id
+            );
+            assert_eq!(shelf[0].title, "Overview");
+            assert_eq!(shelf[0].mode, mode);
+        }
+    }
+
+    /// Its page is a WINDOW, not paper: composed from the live probe.
+    #[test]
+    fn the_overview_page_is_live() {
+        for mode in ["top", "dash"] {
+            let nb = list_notebooks(Some(mode)).remove(0);
+            assert_eq!(nb.pages.len(), 1);
+            assert!(nb.pages[0].live, "{mode} Overview page must be live");
+            assert_eq!(nb.pages[0].id, overview_page_id(mode));
+            // It still describes itself, so a listing or export is never blank.
+            assert!(!nb.pages[0].markdown.trim().is_empty());
+        }
+    }
+
+    /// ⚠ Both modes' Overview share one id, so a page must be resolved by MODE.
+    /// Resolving by id alone opened the Top page while standing in Dash.
+    #[test]
+    fn the_two_overviews_share_an_id_but_never_a_page() {
+        let top = list_notebooks(Some("top")).remove(0);
+        let dash = list_notebooks(Some("dash")).remove(0);
+        assert_eq!(top.id, dash.id);
+        assert_ne!(top.pages[0].id, dash.pages[0].id);
+        assert_eq!(overview_page_id("top"), "overview-top");
+        assert_eq!(overview_page_id("dash"), "overview-dash");
+    }
+
+    /// Every other notebook is paper, and none of them may claim Overview's id.
+    #[test]
+    fn no_stored_notebook_can_shadow_overview() {
+        let dir = std::env::temp_dir().join("ytop-overview-shadow-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let impostor = Notebook {
+            id: OVERVIEW_ID.to_string(),
+            title: "Impostor".to_string(),
+            mode: "top".to_string(),
+            description: String::new(),
+            author: "test".to_string(),
+            created_at_ms: 0,
+            pages: vec![Page {
+                id: "x".to_string(),
+                title: "x".to_string(),
+                markdown: "x".to_string(),
+                ytrace_queries: vec![],
+                chart: None,
+                live: false,
+            }],
+        };
+        std::fs::write(
+            dir.join("impostor.json"),
+            serde_json::to_string(&impostor).unwrap(),
+        )
+        .unwrap();
+
+        let previous = std::env::var("YTOP_NOTEBOOK_HOME").ok();
+        unsafe { std::env::set_var("YTOP_NOTEBOOK_HOME", &dir) };
+        let shelf = list_notebooks(Some("top"));
+        match previous {
+            Some(v) => unsafe { std::env::set_var("YTOP_NOTEBOOK_HOME", v) },
+            None => unsafe { std::env::remove_var("YTOP_NOTEBOOK_HOME") },
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let overviews: Vec<&Notebook> = shelf.iter().filter(|n| is_overview(&n.id)).collect();
+        assert_eq!(overviews.len(), 1, "exactly one Overview must survive");
+        assert_eq!(overviews[0].title, "Overview", "the impostor won");
+        assert!(overviews[0].pages[0].live);
+    }
+
+    /// Stored notebooks written before `live` existed must still load.
+    #[test]
+    fn a_page_without_the_live_field_loads_as_paper() {
+        let page: Page = serde_json::from_str(
+            r#"{"id":"p1","title":"t","markdown":"m","ytrace_queries":[],"chart":null}"#,
+        )
+        .unwrap();
+        assert!(!page.live);
+    }
 }

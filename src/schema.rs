@@ -39,9 +39,11 @@ impl Default for View {
             new_machine_alias: String::new(),
             new_machine_label: String::new(),
             new_machine_is_yggdrasil: false,
-            selected_notebook: None,
-            selected_page: None,
-            expanded_notebooks: Vec::new(),
+            // ytop opens on Overview — the dashboard IS a notebook, so there
+            // is no nameless view you reach by having selected nothing.
+            selected_notebook: Some(crate::notebook::OVERVIEW_ID.to_string()),
+            selected_page: Some(crate::notebook::overview_page_id(MODE_TOP)),
+            expanded_notebooks: vec![crate::notebook::OVERVIEW_ID.to_string()],
         }
     }
 }
@@ -360,17 +362,28 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
 pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport, timeline: &crate::timeline::Ring, zfs_history: &std::collections::VecDeque<crate::server::ZfsIoSample>) -> Value {
     // If a notebook page is selected, render the book page (paper) — like turning a page.
     // Both Top and Dash have books; Top pages have NO ytrace, Dash pages exclusively ytrace.
-    if let Some(nb_id) = &view.selected_notebook {
+    // ⚠ Overview is a LIVE notebook: it is selected like any other, but its page
+    // is composed below from the current probe rather than read from `markdown`.
+    // Falling through is what makes "every view is a notebook" true without
+    // freezing the dashboard into stored text.
+    if let Some(nb_id) = view
+        .selected_notebook
+        .as_ref()
+        .filter(|id| !crate::notebook::is_overview(id))
+    {
         if let Some(nb) = crate::notebook::get_notebook(nb_id) {
             if let Some(page_id) = &view.selected_page {
-                if let Some(page) = nb.pages.iter().find(|p| &p.id == page_id) {
+                if let Some(page) = nb.pages.iter().find(|p| &p.id == page_id && !p.live) {
                     let mut widgets = Vec::new();
                     // Book chrome: back to dashboards
                     widgets.push(json!({
                         "kind": "button",
                         "id": "book_back",
-                        "label": format!("← Back to {}", if view.mode == MODE_TOP { "Top" } else { "Dash" }),
-                        "action": "refresh",
+                        "label": "← Back to Overview",
+                        "action": format!(
+                            "page_open:{}:0",
+                            crate::notebook::OVERVIEW_ID
+                        ),
                     }));
                     let ytrace_badge = if page.has_ytrace() { " 🔬 ytrace" } else { " · host-only" };
                     widgets.push(json!({
@@ -916,4 +929,106 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
             json!({"kind": "button", "id": "refresh_viewport", "action": "refresh", "label": "Refresh Dashboard"}),
         ]
     })
+}
+
+#[cfg(test)]
+mod overview_view_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn machine(host: &str) -> Machine {
+        Machine {
+            key: Some(host.to_string()),
+            readings: vec![json!({
+                "ok": true,
+                "host": host,
+                "label": host,
+                "cpu_busy_pct": 12.0,
+                "cpu_count": 8,
+                "cpu_model": "Test CPU",
+                "kernel": "test",
+                "arch": "x86_64",
+                "uptime_s": 3600.0,
+                "procs_total": 100,
+                "load": [0.5, 0.4, 0.3],
+                "mem_total_kb": 8_000_000,
+                "mem_available_kb": 4_000_000,
+                "swap_total_kb": 0,
+                "swap_free_kb": 0,
+                "containers": [],
+                "zfs": {"has_zfs": false, "pools": [], "datasets": [], "iostat": null},
+                "top": [],
+            })],
+        }
+    }
+
+    fn render(view: &View) -> String {
+        let report = FleetRowsReport::default();
+        let ring = crate::timeline::Ring::default();
+        let zfs = std::collections::VecDeque::new();
+        let out = viewport_view(view, &[machine("alpha")], &report, &ring, &zfs);
+        serde_json::to_string(&out).unwrap()
+    }
+
+    /// ⭐ ytop opens ON Overview — there is no nameless view you reach by having
+    /// selected nothing.
+    #[test]
+    fn the_default_view_opens_on_overview() {
+        let view = View::default();
+        assert_eq!(
+            view.selected_notebook.as_deref(),
+            Some(crate::notebook::OVERVIEW_ID)
+        );
+        assert_eq!(
+            view.selected_page.as_deref(),
+            Some(crate::notebook::overview_page_id(MODE_TOP).as_str())
+        );
+    }
+
+    /// ...and selecting it renders the LIVE dashboard, not stored markdown.
+    /// This is the whole claim: a notebook that is nonetheless a window.
+    #[test]
+    fn overview_renders_the_live_dashboard_not_a_stored_page() {
+        let text = render(&View::default());
+        // The live host card, composed from the reading above.
+        assert!(text.contains("Test CPU"), "live probe data is missing");
+        // ...and NOT the stored-page chrome that every paper notebook carries.
+        assert!(
+            !text.contains("Back to Overview"),
+            "Overview rendered as a stored page instead of the live view"
+        );
+    }
+
+    /// An ordinary notebook still renders as paper, with its way back.
+    #[test]
+    fn a_paper_notebook_still_renders_as_a_page() {
+        let nb = crate::notebook::list_notebooks(Some(MODE_TOP))
+            .into_iter()
+            .find(|n| !crate::notebook::is_overview(&n.id))
+            .expect("a paper notebook must exist on the Top shelf");
+        let view = View {
+            selected_notebook: Some(nb.id.clone()),
+            selected_page: Some(nb.pages[0].id.clone()),
+            ..View::default()
+        };
+        let text = render(&view);
+        assert!(text.contains("Back to Overview"), "no way back to Overview");
+    }
+
+    /// ⚠ Each mode opens on ITS Overview. Carrying Top's page into Dash left the
+    /// viewport on a page that is not on the shelf being looked at.
+    #[test]
+    fn each_mode_has_its_own_overview_page() {
+        assert_ne!(
+            crate::notebook::overview_page_id(MODE_TOP),
+            crate::notebook::overview_page_id(MODE_DASH)
+        );
+        let dash = View {
+            mode: MODE_DASH.to_string(),
+            selected_page: Some(crate::notebook::overview_page_id(MODE_DASH)),
+            ..View::default()
+        };
+        // Still the live view, not a stored page.
+        assert!(!render(&dash).contains("Back to Overview"));
+    }
 }

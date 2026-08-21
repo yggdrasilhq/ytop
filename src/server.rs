@@ -190,6 +190,21 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
 
             if action == "mode" {
                 pane.view.mode = value.to_string();
+                // Each mode opens on ITS Overview. Carrying the other mode's
+                // selection across would leave the viewport on a page that is
+                // not on the shelf you are now looking at.
+                pane.view.selected_notebook = Some(crate::notebook::OVERVIEW_ID.to_string());
+                pane.view.selected_page = Some(crate::notebook::overview_page_id(value));
+                if !pane
+                    .view
+                    .expanded_notebooks
+                    .iter()
+                    .any(|id| crate::notebook::is_overview(id))
+                {
+                    pane.view
+                        .expanded_notebooks
+                        .push(crate::notebook::OVERVIEW_ID.to_string());
+                }
                 pane.touch();
             } else if let Some(host) = action.strip_prefix("select_host:") {
                 pane.view.selected_host = host.to_string();
@@ -255,7 +270,15 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 if let Some((nb_id, idx_str)) = rest.split_once(':') {
                     if let Ok(idx) = idx_str.parse::<usize>() {
                         pane.view.selected_notebook = Some(nb_id.to_string());
-                        if let Some(nb) = crate::notebook::get_notebook(nb_id) {
+                        if crate::notebook::is_overview(nb_id) {
+                            // ⚠ Overview exists once per MODE and both carry the
+                            // same id, so resolving it by id alone would open the
+                            // Top page while standing in Dash. The mode decides.
+                            let mode = pane.view.mode.clone();
+                            pane.view.selected_page =
+                                Some(crate::notebook::overview_page_id(&mode));
+                            pane.view.notice = None;
+                        } else if let Some(nb) = crate::notebook::get_notebook(nb_id) {
                             if let Some(page) = nb.pages.get(idx) {
                                 pane.view.selected_page = Some(page.id.clone());
                                 pane.view.notice = Some(format!("📖 {} — {}", nb.title, page.title));
@@ -295,6 +318,8 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                         markdown,
                         ytrace_queries,
                         chart,
+                        // Agent-composed pages are paper, never a live window.
+                        live: false,
                     })
                 }).collect();
                 let nb = crate::notebook::Notebook {
@@ -311,6 +336,7 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                             markdown: format!("# {title}\n\nComposed via ytop skill on host `{}`.", pane.view.selected_host),
                             ytrace_queries: vec![],
                             chart: None,
+                            live: false,
                         }]
                     } else { pages },
                 };
