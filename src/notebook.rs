@@ -301,6 +301,119 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Dash — UI Latency & Thread Blocks
+        Notebook {
+            id: "dash-ui-latency-blocks".to_string(),
+            title: "UI Latency & Thread Block Root Cause (200ms Stalls)".to_string(),
+            mode: "dash".to_string(),
+            description: "Investigating the 224-253ms UI thread stalls, level-triggered probe storms, and synchronous file descriptor locks.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "ui-blocks-p1".to_string(),
+                    title: "1. Stalls Exceeding Interactive Budget".to_string(),
+                    markdown: "# UI Latency & Thread Block Investigation\n\n> **Invariant:** The desktop UI thread must never stall for >200 ms (perceptible lag) or >1,000 ms (freeze).\n\nAn off-thread watchdog monitors the UI event loop. When a stall occurs, `ui/block` records the gap duration and the `last_activity` executed prior to the stall.\n\n### Root Cause Breakdown\n1. **Level-Triggered Telemetry Storm**: `web_surface/liveness (stale_detected)` was being evaluated and emitted on *every render frame* for background sessions.\n2. **Uncached Telemetry Appender**: Every single event call invoked `fs::metadata` + `OpenOptions::open`, locking the filesystem synchronously on the UI thread.\n3. **Resolution**: `ytrace::Provider` holds an open file descriptor, and `stale_detected` is edge-triggered / throttled.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "ui".to_string(),
+                            name: "block".to_string(),
+                            since_ms: 7200000,
+                        },
+                    ],
+                    chart: Some("table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "ui-blocks-p2".to_string(),
+                    title: "2. Application Latency Flamegraph".to_string(),
+                    markdown: "## Application Latency Flamegraph\n\n> Hierarchical time distribution across GUI rendering, WebKit IPC, CLI refreshes, and background chores.\n\nNotice the heavy proportion of `render/web_content` and `render/gui` relative to CLI process execution.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "render".to_string(),
+                            name: "gui".to_string(),
+                            since_ms: 7200000,
+                        },
+                    ],
+                    chart: Some("flamegraph".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+        // Dash — Web Surface OSC 7717 & Background Clock Decoupling
+        Notebook {
+            id: "dash-web-surface-liveness".to_string(),
+            title: "Web Surface OSC 7717 & Background Clock Decoupling".to_string(),
+            mode: "dash".to_string(),
+            description: "Investigating false-positive stale event bursts (2,932 events/hr) and foreground vs background read clock transition.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "ws-liveness-p1".to_string(),
+                    title: "1. The Level-Triggered Storm".to_string(),
+                    markdown: "# Web Surface Liveness Storm\n\n> **Telemetry Analysis**: 2,932 `stale_detected` events were emitted in 60 minutes.\n\n### The Problem\nBackground tabs do not receive live PTY reads, so their `last_seen_ms` appears older than 45 seconds. Sidebar render ticks called `has_live_web_surface` on background tabs, treating expected quiescence as an active fault and firing thousands of duplicate trace events.\n\n### The Fix\nPredicate evaluation is now edge-triggered: only the actively listened session (`reads_since > 0`) emits staleness, with a 30s per-session cooldown.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "web_surface".to_string(),
+                            name: "liveness".to_string(),
+                            since_ms: 7200000,
+                        },
+                    ],
+                    chart: Some("timeseries".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "ws-liveness-p2".to_string(),
+                    title: "2. Clock Invariant (reads_since Grace)".to_string(),
+                    markdown: "## Clock Invariant: reads_since\n\nWhen a background session is foregrounded, its declares haven't arrived yet. Evaluating raw `last_seen_ms` caused the bare terminal to flash for 0–4s before the first heartbeat landed.\n\n`last_seen_ms.max(reads_since)` ensures that switching to a background session provides a fresh 45s grace period for live listening before declaring the surface stale.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "web_surface".to_string(),
+                            name: "liveness".to_string(),
+                            since_ms: 7200000,
+                        },
+                    ],
+                    chart: Some("table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+        // Dash — Fleet Health & Incident Spikes
+        Notebook {
+            id: "dash-fleet-health-spikes".to_string(),
+            title: "Fleet Health & Incident Spikes Diagnostics".to_string(),
+            mode: "dash".to_string(),
+            description: "Tracking multi-host telemetry trends, incident rollups, and latency percentiles.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "fleet-health-p1".to_string(),
+                    title: "1. Time-Series Incident Spikes".to_string(),
+                    markdown: "# Fleet Health & Incident Trends\n\n> Rolling time-series buckets aggregating probe counts, span latencies, and incident alerts across all fleet hosts.\n\nInspect the spike at 15:00:00 UTC corresponding to the unthrottled stale probe burst, followed by convergence.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "yggterm".to_string(),
+                            category: "perf".to_string(),
+                            name: "render".to_string(),
+                            since_ms: 7200000,
+                        },
+                    ],
+                    chart: Some("timeseries".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
         // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles + input + agy/codex)
         Notebook {
             id: "dash-common-bugs".to_string(),
