@@ -14,6 +14,7 @@ mod schema;
 mod server;
 mod sysinternals;
 mod timeline;
+mod trace;
 
 use anyhow::Result;
 use clap::Parser;

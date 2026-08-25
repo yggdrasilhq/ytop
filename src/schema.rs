@@ -351,6 +351,7 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
 
                     // ── CARD 3: REAL-TIME OBSERVABILITY & VISUAL DIAGNOSTICS ──
                     if page.has_ytrace() {
+                        let _span = crate::trace::span("notebook", "query");
                         widgets.push(section("📊 Real-Time Observability & Visual Diagnostics", true));
                         if let Some(q) = page.ytrace_queries.first() {
                             let homes = {

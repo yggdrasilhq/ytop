@@ -12,3 +12,4 @@ pub mod schema;
 pub mod server;
 pub mod sysinternals;
 pub mod timeline;
+pub mod trace;

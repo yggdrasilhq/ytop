@@ -414,6 +414,65 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Dash — ytop Self-Observation
+        Notebook {
+            id: "dash-ytop-self-observation".to_string(),
+            title: "ytop Self-Observation — Probes, Renders & Event Loop".to_string(),
+            mode: "dash".to_string(),
+            description: "ytop observing its own execution timeline via ytrace: host probe cycles, DOM schema assembly, OSC 7717 heartbeats, and action dispatches.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "ytop-self-p1".to_string(),
+                    title: "1. Probe Execution Latency (Local & Remote)".to_string(),
+                    markdown: "# ytop Probe Execution Spans\n\n> **Invariant:** Probe execution must remain bounded (<500ms local, <1.5s remote SSH) to prevent dashboard freeze.\n\n`ytop` measures each probe iteration under provider `ytop` with probes `probe/host_local`, `probe/host_remote`, `probe/zfs_iostat`, and `probe/lxc_containers`.\n\n### Observability Query\nRun `ytrace query --app ytop --category probe --since 1h` to inspect probe duration distributions across fleet nodes.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "ytop".to_string(),
+                            category: "probe".to_string(),
+                            name: "host_local".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("timeseries".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "ytop-self-p2".to_string(),
+                    title: "2. Schema Assembly & Viewport Rendering".to_string(),
+                    markdown: "## Schema Assembly & DOM Rendering Flamegraph\n\n> Profiling time spent in `schema::viewport_view` vs `schema::rail_view` vs `schema::notebook_view`.\n\n`render/viewport` measures the schema tree generation. Because ytop is a pure document-surface app, schema assembly is sub-millisecond.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "ytop".to_string(),
+                            category: "render".to_string(),
+                            name: "viewport".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("flamegraph".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "ytop-self-p3".to_string(),
+                    title: "3. Action Dispatch & Interactive Events".to_string(),
+                    markdown: "## Action Dispatch & Interactive Events\n\n> Tracing all `POST /action` dispatches: mode toggles, container accordion expands, notebook tab navigation, and jankbox process reaper executions.".to_string(),
+                    ytrace_queries: vec![
+                        YtraceQuery {
+                            provider: "ytop".to_string(),
+                            category: "action".to_string(),
+                            name: "dispatch".to_string(),
+                            since_ms: 3600_000,
+                        },
+                    ],
+                    chart: Some("table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
         // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles + input + agy/codex)
         Notebook {
             id: "dash-common-bugs".to_string(),

@@ -411,6 +411,19 @@ fn control_master_options() -> Vec<String> {
 /// machine is idle" are different facts, and a topology that renders the first
 /// as the second is worse than one that shows nothing: it invites a decision.
 pub fn read_host(host: Option<&str>, timeout: Duration) -> Value {
+    let _span = if host.is_none() {
+        crate::trace::span_with(
+            "probe",
+            "host_local",
+            serde_json::json!({ "sample_ms": CPU_SAMPLE_MS }),
+        )
+    } else {
+        crate::trace::span_with(
+            "probe",
+            "host_remote",
+            serde_json::json!({ "host": host, "sample_ms": CPU_SAMPLE_MS }),
+        )
+    };
     let mut command = match host {
         None => {
             let mut c = Command::new("python3");

@@ -176,16 +176,19 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
             }));
         }
         ("GET", "/pane/topo") => {
+            let _span = crate::trace::span("render", "viewport");
             let pane = state.lock().unwrap();
             respond(stream, 200, &schema::viewport_view(&pane.view, &pane.machines, &pane.rows_report, &pane.timeline, &pane.zfs_history));
         }
         ("GET", "/pane/rail") => {
+            let _span = crate::trace::span("render", "rail");
             let pane = state.lock().unwrap();
             respond(stream, 200, &schema::rail_view(&pane.view, &pane.machines, &pane.rows_report));
         }
         ("POST", "/action") => {
             let action = body["action"].as_str().unwrap_or("");
             let value = body["value"].as_str().unwrap_or("");
+            let _span = crate::trace::span_with("action", "dispatch", json!({ "action": action, "value": value }));
             let mut pane = state.lock().unwrap();
 
             if action == "mode" {
