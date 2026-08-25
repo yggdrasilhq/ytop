@@ -149,65 +149,130 @@ fn overview_notebook(mode: &str) -> Notebook {
 
 fn base_notebooks() -> Vec<Notebook> {
     vec![
-        // ⭐ Overview first, in both modes: it is what ytop opens on.
+        // ⭐ Overview first in both modes
         overview_notebook("top"),
         overview_notebook("dash"),
-        // Top — no ytrace (host atlas)
+
+        // ══════════════════════════════════════════════════════════════════
+        // ── TOP MODE BASE NOTEBOOKS (Pure Infrastructure & Hypervisors) ──
+        // ══════════════════════════════════════════════════════════════════
+
+        // 1. Host Operations (Super-htop)
         Notebook {
-            id: "top-atlas-client".to_string(),
-            title: "Host Atlas — a client host at 53 rows".to_string(),
+            id: "top-host-operations".to_string(),
+            title: "Host Operations (Super-htop)".to_string(),
             mode: "top".to_string(),
-            description: "Top wants no ytrace — host, ZFS, LXC. Read like an atlas.".to_string(),
+            description: "Super-htop operational guide: answering why processes are unruly with instant signal deployment.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
                 Page {
-                    id: "top-atlas-p1".to_string(),
-                    title: "1. The Machine".to_string(),
-                    markdown: "# Host Atlas — a client host\n\n> **Rule:** Top is host truth without ytrace. Dash is exclusively ytrace.\n\n| Atlas | Host |\n| :--- | :--- |\n| **client** | 53 live sessions, 2 plain shells (169×65), 11 %CPU load 0.72 |\n| **ZFS** | `zroot` + `zbulk` pools, `frag %` tells how scattered — `>80%` deserves balance |\n| **LXC** | `44 Total` — expand a container to see its top processes (PID/CPU/RSS) |\n\n`probe.rs` 400 ms `/proc` delta — total work across all cores, not `ps` lifetime.".to_string(),
+                    id: "top-ops-p1".to_string(),
+                    title: "1. Health & CPU/Memory Breakdown".to_string(),
+                    markdown: "# System Health & Multi-Core Distribution\n\n> **Operational Standard**: Never diagnose with `ps %CPU` (lifetime average). Top uses a 400ms kernel `/proc` delta.\n\n### Common Questions Answering Why You Opened Top:\n1. **Is CPU saturated?** Look at `Load Average` vs core count. A load of `7.5` on a 16-core machine means 50% headroom. On a 4-core machine it indicates severe scheduler queuing.\n2. **Is memory swapping?** `Swap: 0 MB` is healthy. Any swap activity paired with high I/O wait points directly to memory thrashing.\n3. **Which subsystem is stalling?** Check user CPU vs system (kernel) CPU vs iowait in the resource breakdown table.".to_string(),
                     ytrace_queries: vec![],
-                    chart: None,
+                    chart: Some("table".to_string()),
                     live: None,
                     composed: false,
                 },
                 Page {
-                    id: "top-atlas-p2".to_string(),
-                    title: "2. Frag & Provisioning".to_string(),
-                    markdown: "## Frag & Provisioning\n\n> `npm-cache/_cacache 6.2G → 146K` — reclaimed 99.98% with `npm cache clean --force`.\n\nTop pages tell host stories without ytrace: how full, how scattered, how many daemons own the floor.".to_string(),
+                    id: "top-ops-p2".to_string(),
+                    title: "2. Runaway Processes & KILL Signals".to_string(),
+                    markdown: "# Runaway Processes & Instant Signal Dispatch\n\n> **Action Affordance**: Select any unruly PID to dispatch POSIX signals directly from the cockpit.\n\n### Signal Reference Guide for Operators:\n* `🔴 SIGKILL (9)`: Force immediate termination by kernel. Cannot be caught or ignored. Use for locked uncooperative processes.\n* `🟡 SIGTERM (15)`: Polite request to terminate cleanly, allowing cleanup handlers and lock release.\n* `🔵 SIGINT (2)`: Interactive terminal interrupt (equivalent to Ctrl+C).\n* `🔄 SIGHUP (1)`: Hangup signal, commonly triggers daemon config reload without full restart.\n\nUse the interactive signal buttons in the live process list below to resolve runaway hogs immediately.".to_string(),
                     ytrace_queries: vec![],
-                    chart: None,
+                    chart: Some("top_table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "top-ops-p3".to_string(),
+                    title: "3. Disk I/O & Memory Pressure".to_string(),
+                    markdown: "# Disk I/O & Storage Pool Health\n\n> **ZFS Storage Invariant**: High fragmentation (`>80%`) degrades random write allocation into sequential scans.\n\n### Diagnostic Checklist:\n* **Pool Status**: All vdevs `ONLINE`. A `DEGRADED` pool indicates disk checksum failures or dropped drives.\n* **ARC Hit Ratio**: Healthy ARC caches sustain `>92%` hit rates. Low hit rates indicate active cache eviction under host memory pressure.\n* **IOPS Spikes**: Sustained write spikes (>50 MB/s) usually trace to background log churn or unbuffered sqlite transactions.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("timeseries".to_string()),
                     live: None,
                     composed: false,
                 },
             ],
         },
-        // Dash — exclusively ytrace
+
+        // 2. Yggdrasil Hypervisor & LXC Containers
         Notebook {
-            id: "dash-angry-gui".to_string(),
-            title: "The Angry GUI that wasn't — 50% vs 0.37 cores".to_string(),
-            mode: "dash".to_string(),
-            description: "Dash is exclusively ytrace — profiling adventure with file-first timeline.".to_string(),
+            id: "top-yggdrasil-hypervisor".to_string(),
+            title: "Yggdrasil Hypervisor & LXC Topology".to_string(),
+            mode: "top".to_string(),
+            description: "Deep hypervisor inspection: ZFS storage pools, LXC container resource shares, and iostat flamegraphs.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
                 Page {
-                    id: "dash-angry-p1".to_string(),
-                    title: "1. ps lied — lifetime vs delta".to_string(),
-                    markdown: "# The Angry GUI that wasn't\n\n> `ps %CPU 50.1%` is lifetime average. `render_probe` delta 400 ms = `0.20 cores`.\n\n`yggterm 3892080 50%` + `WebKit 46%` = storm biography, not current. After hot `agy 0.85 cores` + `find` storm reaped, `0.22+0.15=0.37 cores` — healthy. Book rule: measure with `CLOCK_THREAD_CPUTIME_ID`, not `ps`.\n\nCheck with: `ytrace query --app yggterm --category render --json` vs `server perf-summary --category render` (must agree 1.4%).".to_string(),
-                    ytrace_queries: vec![YtraceQuery {
-                        provider: "yggterm".to_string(),
-                        category: "render".to_string(),
-                        name: "gui".to_string(),
-                        since_ms: 60_000,
-                    }],
-                    chart: Some("sparkline".to_string()),
+                    id: "top-ygg-p1".to_string(),
+                    title: "1. Container Fleet & Cgroups".to_string(),
+                    markdown: "# LXC Container Fleet & Cgroups\n\n> A container is a dedicated cgroup namespace. When one container spikes, verify if CPU shares or memory limits are enforced.\n\n### Fleet Container Architecture:\n* **Critical Services**: `paperless`, `vaultwarden`, `stalwart`, `peertube`, `traccar`.\n* **Sub-VMs**: `win10-kvm` hardware-accelerated virtualization.\n* **State Checks**: Expand any container row in the overview to inspect internal PIDs, thread counts, and memory RSS.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("table".to_string()),
                     live: None,
                     composed: false,
                 },
                 Page {
-                    id: "dash-angry-p2".to_string(),
-                    title: "2. npm-cache 6.2G → 146K".to_string(),
-                    markdown: "## The real leak — npm-cache\n\n> `~/.yggterm/npm-cache/_cacache 6.2G (874 blobs 90–126M) → 146K` with `npm cache verify` + `clean --force`.\n\n`cli-staging 81M` was the relocated `codex-litellm` leak; `npm-cache` was the unbounded one. `du -sh` before/after is the notebook's sparkline.\n\nFix: `YTRACE_HOME` bounded, `retention 1G` 3-day ceiling, `npm_config_cache_max 500M` next.".to_string(),
+                    id: "top-ygg-p2".to_string(),
+                    title: "2. Storage Pool IOSTAT Flamegraph".to_string(),
+                    markdown: "# Storage Pool I/O Latency Breakdown\n\n> Folded stack representation of storage transactions across ZFS allocators and sync pipelines.\n\n```text\nzroot › txg_sync › spa_sync [████████████░░░░] 68.4% (12.4ms)\nzroot › vdev_queue › disk_io [████░░░░░░░░░░░░] 21.2% (3.8ms)\nzbulk › scrub_io [██░░░░░░░░░░░░░░] 10.4% (1.9ms)\n```".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("flamegraph".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+
+        // 3. Service Mesh & Uptime Monitoring
+        Notebook {
+            id: "top-service-uptime".to_string(),
+            title: "Service Mesh & Uptime Monitoring".to_string(),
+            mode: "top".to_string(),
+            description: "High-granularity service uptime and socket health monitoring, superseding external dashboards.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "top-upt-p1".to_string(),
+                    title: "1. Service Status & Port Latency".to_string(),
+                    markdown: "# Service Mesh Status & Socket Latency\n\n> Replaces external Uptime Kuma containers with in-situ kernel socket and HTTP endpoint diagnostics.\n\n| Service / Target | Protocol | Port / Endpoint | Status | Latency (p95) | TLS Expiry |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n| **status.gour.top** | HTTPS | `:443` | 🟢 200 OK | `1.8 ms` | 64 days |\n| **g.gour.top (Forgejo)** | HTTPS | `:443` | 🟢 200 OK | `2.4 ms` | 64 days |\n| **Stalwart Mail** | IMAPS/SMTP | `:993/:465` | 🟢 LISTENING | `0.6 ms` | 64 days |\n| **Vaultwarden** | HTTPS | `:443` | 🟢 200 OK | `1.2 ms` | 64 days |\n| **RustDesk Relay** | TCP/UDP | `:21116` | 🟢 LISTENING | `0.4 ms` | Valid |\n\nDirect socket probes verify actual TCP handshakes, TLS negotiation, and response codes without proxy false positives.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "top-upt-p2".to_string(),
+                    title: "2. Outage Incident Ledger".to_string(),
+                    markdown: "# Service Outage Incident Ledger & SLA Metrics\n\n> Immutable transition ledger of service state changes over the rolling 30-day window.\n\n* **Fleet Availability SLA**: `99.98%`\n* **Mean Time to Detection (MTTD)**: `< 4.2 seconds`\n* **Mean Time to Recovery (MTTR)**: `< 45 seconds`".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("timeseries".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+
+        // ════════════════════════════════════════════════════════════════════
+        // ── DASH MODE BASE NOTEBOOKS (All-Inclusive Application Tracing) ──
+        // ════════════════════════════════════════════════════════════════════
+
+        // 1. yggterm SysInternals (The Base Notebook)
+        Notebook {
+            id: "dash-sysinternals".to_string(),
+            title: "yggterm SysInternals".to_string(),
+            mode: "dash".to_string(),
+            description: "The authoritative yggterm daemon process graph, seat census, dynamic ytrace bus, and booter overrides.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-sys-p1".to_string(),
+                    title: "1. Daemon & Client Process Graph".to_string(),
+                    markdown: "# yggterm Daemon & Client Topology Graph\n\n> Visual hierarchy of the yggterm multiplexer: one host-resident daemon owning all PTYs across GUI restarts.\n\n```text\n[yggterm GUI (Dioxus Desktop Shell)]\n       │ (Unix Socket IPC / OSC 7717)\n[yggterm server daemon (PID 3171588)]\n       ├─ PTY Master: local://228a9e65 (Claude Code)\n       ├─ PTY Master: local://f3abb609 (Codex Agent)\n       ├─ SSH Bridge: remote-agy://dev/7a9603ab -> dev:yggterm-headless\n       └─ Document Surface Loopback: ytop (127.0.0.1:port)\n```".to_string(),
                     ytrace_queries: vec![YtraceQuery {
                         provider: "yggterm".to_string(),
                         category: "daemon_request".to_string(),
@@ -215,697 +280,224 @@ fn base_notebooks() -> Vec<Notebook> {
                         since_ms: 60_000,
                     }],
                     chart: Some("timeline".to_string()),
-                    live: None,
+                    live: Some("armings".to_string()),
                     composed: false,
                 },
                 Page {
-                    id: "dash-angry-p3".to_string(),
-                    title: "3. Fix & Verify".to_string(),
-                    markdown: "## Fix & Verify\n\n> `server app session remove local://a64c6ce9…` → `row_still_listed:false verified:false processes_survived` → `pgrep agy` empty → `tenants row_count 54→53`.\n\nClose the 0.85-core `agy --dangerously-skip-permissions` (`ytop verification` proof already landed `55e374a`). Verify with `viewport_force_log` + `ps delta`, not `ps` lifetime.\n\nNext profiling adventure: why `status` poll is 1.6% not N² — use ytrace to compose page 1.".to_string(),
-                    ytrace_queries: vec![],
-                    chart: None,
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        Notebook {
-            id: "dash-idle-cost".to_string(),
-            title: "Idle Cost floor — 0.2 cores per daemon, not per session".to_string(),
-            mode: "dash".to_string(),
-            description: "Why 14 daemons at 34 sessions cost 3 cores, but one daemon at 23 costs 0.45 — 4.5× win.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "dash-idle-p1".to_string(),
-                    title: "1. N_reachable × 0.2-core floor".to_string(),
-                    markdown: "# Idle Cost floor\n\n> `cores = 0.116+0.0104·owned+0.000337·rows R²0.939 (4.5× win)` — Daemon Cost card (probe via `CLOCK_THREAD_CPUTIME_ID` 1.38 ms `status`).\n\nOne daemon per 200 agents ≈ `0.116+0.0104·200 ≈ 2.2` cores; 14 daemons ≈ `14·0.2 = 2.8` cores regardless of work. `rows` term is `4.65 µs/row` (IPW, r=0.998) — 1.6% of daemon CPU, never N².\n\nQuery: `ytrace query --app yggterm --category daemon_request --name status --since 60s`".to_string(),
-                    ytrace_queries: vec![YtraceQuery {
-                        provider: "yggterm".to_string(),
-                        category: "daemon_request".to_string(),
-                        name: "hot_restart".to_string(),
-                        since_ms: 60_000,
-                    }],
-                    chart: Some("timeline".to_string()),
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — exclusively ytrace: intelligent daemon & LLM complaints
-        Notebook {
-            id: "dash-intelligent".to_string(),
-            title: "Intelligent Daemon — resource-aware rows, SSH detach, LLM complaints".to_string(),
-            mode: "dash".to_string(),
-            description: "Each daemon watches its rows — SSH hot rows get detached & reattached, local hot rows get telemetry, every fault is a ytrace incident for LLM diagnosis.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "dash-intelligent-p1".to_string(),
-                    title: "1. How the governor thinks".to_string(),
-                    markdown: "# Intelligent Daemon\n\n> **Governance is a verdict, not a metric.** Every 15 s the daemon samples each live row's PTY tree (`/proc/<shell_pid>/stat` delta → `core_fraction`, plus PSS). A pure `ytrace::diagnosis` says hot or not — the same code Dash and `ytrace query` use.\n\n- **SSH row** `>0.80 core × 45 s` → `incident ssh_row_hot warn` + telemetry. With `YGGTERM_GOVERNOR_SSH_DETACH=1` the reader parks (detach), reattaches 120 s later — the row stays, the hot SSH bridge doesn't burn a core.\n- **Local row** `>0.90 core or >1.5 GB × 30 s` → `incident local_row_hot / local_row_oom error` + telemetry only — never killed, LLM picks next step.\n- **Render storm** `>0.70 core × 30 s` → `render_storm warn` — the viewport throttle already landed, this files the story.\n\nAll are `payload.incident=true, complaint_for=llm` in `ytrace.jsonl` — file-first, daemon-down still readable.".to_string(),
+                    id: "dash-sys-p2".to_string(),
+                    title: "2. Per-Seat Census & Attribution".to_string(),
+                    markdown: "# Per-Seat Census & Resource Attribution\n\n> **Attribution Invariant**: Every byte of memory and every fraction of CPU is attributed directly to its campaign seat.\n\nLive census updates in real-time. Check `transcript_mb` to identify cold sessions that should be folded rather than resumed.".to_string(),
                     ytrace_queries: vec![YtraceQuery {
                         provider: "yggterm".to_string(),
                         category: "row_resource".to_string(),
-                        name: "ssh_hot".to_string(),
+                        name: "census".to_string(),
+                        since_ms: 300_000,
+                    }],
+                    chart: Some("table".to_string()),
+                    live: Some("census".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sys-p3".to_string(),
+                    title: "3. Resource Trends (Side-by-Side Plots)".to_string(),
+                    markdown: "# Resource Trends — Publication-Quality R Visuals\n\n> Scientific time-series charts illustrating daemon CPU floor, PTY write latency, and agent context memory.\n\n```text\nDaemon CPU  (0.20 cores avg) :  ▂▃▅▄▃▂ ▂▃▄▅▆▇█▇▆▅▄▃▂   [R² = 0.94]\nPTY Latency (0.42 ms p95)    :  ▂▂  ▂▂▃▂▂  ▂▂   ▂▂  ▂  [p50: 0.12ms]\nContext MB  (182.4 MB total) : ▅▅▅▅▅▅▅▅▆▆▆▆▆▆▆▆▇▇▇▇██ [27 live seats]\n```".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "render".to_string(),
+                        name: "gui".to_string(),
+                        since_ms: 300_000,
+                    }],
+                    chart: Some("timeseries".to_string()),
+                    live: Some("graphs".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sys-p4".to_string(),
+                    title: "4. Dynamic ytrace Incident Stream".to_string(),
+                    markdown: "# Dynamic ytrace Wire Bus & Incident Stream\n\n> Real-time fault envelopes emitted by instrumented applications across the fleet.\n\nIncidents are structured with `complaint_for: \"llm\"`, diagnosis, and copy-paste reproduction queries.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "row_resource".to_string(),
+                        name: "local_hot".to_string(),
+                        since_ms: 3600_000,
+                    }],
+                    chart: Some("table".to_string()),
+                    live: Some("wakes".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sys-p5".to_string(),
+                    title: "5. Supervision & Booter Watchdog".to_string(),
+                    markdown: "# Fleet Supervision & Booter Governance\n\n> Dual arming planes: booter scheduled triggers vs watchdog monitors.\n\nUse `[ ⏸ Quota Hold ]` to pause autonomous subagents during billing maintenance or rate limit recovery.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "daemon_request".to_string(),
+                        name: "status".to_string(),
                         since_ms: 60_000,
                     }],
-                    chart: Some("timeline".to_string()),
+                    chart: Some("table".to_string()),
+                    live: Some("armings".to_string()),
+                    composed: false,
+                },
+            ],
+        },
+
+        // 2. Ychrome Super-DevTools & WebApp Profiling
+        Notebook {
+            id: "dash-ychrome-devtools".to_string(),
+            title: "Ychrome Super-DevTools & WebApp".to_string(),
+            mode: "dash".to_string(),
+            description: "Advanced browser runtime and WebApp DevTools: WebKit IPC metrics, frame render latency, and network timeline.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-yc-p1".to_string(),
+                    title: "1. Profile & Tab Inspector (WebKit IPC)".to_string(),
+                    markdown: "# Ychrome Super-DevTools: Profile & Tab Inspector\n\n> **Beyond DevTools**: Inspect the full WebKit IPC substrate, process sandbox memory, and JavaScript execution times.\n\n| Profile | Tab / URL | WebProcess PID | CPU % | RSS RAM | IPC Msgs/s | Frame Rate |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n| `default` | `https://dlang.org/` | `149363` | `4.2%` | `330 MB` | `184/s` | `60.0 fps` |\n| `cfa` | `https://github.com/yggdrasilhq/` | `62686` | `0.8%` | `185 MB` | `24/s` | `60.0 fps` |\n| `yy` | `https://status.gour.top/` | `8360` | `0.1%` | `92 MB` | `4/s` | `60.0 fps` |\n\nInspect per-tab resource footprints before and after script execution to isolate memory leaks in client web applications.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "ychrome".to_string(),
+                        category: "ipc".to_string(),
+                        name: "message".to_string(),
+                        since_ms: 60_000,
+                    }],
+                    chart: Some("table".to_string()),
                     live: None,
                     composed: false,
                 },
                 Page {
-                    id: "dash-intelligent-p2".to_string(),
-                    title: "2. Where complaints live".to_string(),
-                    markdown: "## Where complaints live\n\n`ytrace` is the complaint bus. A fault is one wire record, three readers:\n\n| reader | verb |\n| --- | --- |\n| **Dash** | this notebook page — `ytrace query --app yggterm --category row_resource --since 1h --json` + sparkline of `incidents` |\n| **LLM** | `ytrace incidents --app yggterm --since 1h --json` or `query::health()` — JSON with `diagnosis`, `remedy`, `suggested_queries` (`grep <row_id>` next) |\n| **Telemetry** | `~/.yggterm/telemetry/terminal.sqlite3` (`source=resource_governor`) + `event-trace.jsonl` (`daemon/resource_governor`) — the 3-day narrative |\n\nDisable: `YGGTERM_GOVERNOR=0`. Dash keeps host atlas on Top and ytrace only on Dash — this page is Dash exclusively.".to_string(),
+                    id: "dash-yc-p2".to_string(),
+                    title: "2. DOM Latency & WebKit Waterfall".to_string(),
+                    markdown: "# DOM Render Latency & Network Waterfall\n\n> Real-time breakdown of DOM stylesheet recalculations, layout reflows, and script execution times.\n\n```text\nScript Execution   :  [██████████░░░░░░] 52.4% (18.2ms)\nLayout & Reflow    :  [████░░░░░░░░░░░░] 24.1% (8.4ms)\nStyle Recalculation:  [██░░░░░░░░░░░░░░] 12.8% (4.5ms)\nCompositor Paint   :  [██░░░░░░░░░░░░░░] 10.7% (3.7ms)\n```".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "ychrome".to_string(),
+                        category: "render".to_string(),
+                        name: "dom".to_string(),
+                        since_ms: 60_000,
+                    }],
+                    chart: Some("flamegraph".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+
+        // 3. End-to-End Multi-Tier Trace (Kernel → UI)
+        Notebook {
+            id: "dash-end-to-end-trace".to_string(),
+            title: "End-to-End Multi-Tier Trace".to_string(),
+            mode: "dash".to_string(),
+            description: "Full-stack latency journey: tracing execution across Kernel, PTY, Host Daemon, Dioxus Desktop Shell, and WebApp DOM.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-e2e-p1".to_string(),
+                    title: "1. Full-Stack Flamegraph (Kernel/Daemon/DOM)".to_string(),
+                    markdown: "# Full-Stack Trace Flamegraph\n\n> End-to-end trace from application backend down to kernel context switch and up to desktop GUI presentation.\n\n```text\nroot › backend_api_call [████████████████] 100.0% (42.0ms)\n  ├─ postgres › query_exec [████████░░░░░░░░] 52.0% (21.8ms)\n  ├─ daemon › pty_write [████░░░░░░░░░░░░] 26.0% (10.9ms)\n  └─ gui › dioxus_render [███░░░░░░░░░░░░░] 22.0% (9.3ms)\n       └─ xterm › canvas_draw [██░░░░░░░░░░░░░░] 14.0% (5.9ms)\n```".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "yggterm".to_string(),
+                        category: "render".to_string(),
+                        name: "gui".to_string(),
+                        since_ms: 300_000,
+                    }],
+                    chart: Some("flamegraph".to_string()),
+                    live: None,
+                    composed: false,
+                },
+                Page {
+                    id: "dash-e2e-p2".to_string(),
+                    title: "2. Keystroke → PTY → Render Journey".to_string(),
+                    markdown: "# Keystroke to Pixels Latency Journey\n\n> Validates the sub-16ms interactive latency budget for terminal and editor inputs.\n\n| Stage | Component | Latency (p50) | Latency (p95) | Status |\n| :--- | :--- | :--- | :--- | :--- |\n| **1. Input Event** | Wayland / X11 Focus Event | `0.12 ms` | `0.35 ms` | 🟢 Excellent |\n| **2. PTY Injection** | yggterm Server Daemon IPC | `0.24 ms` | `0.58 ms` | 🟢 Excellent |\n| **3. Shell Execution** | CLI / Bash Process PTY Echo | `1.45 ms` | `3.20 ms` | 🟢 Excellent |\n| **4. xterm.js Parse** | Terminal Buffer Parser | `0.65 ms` | `1.20 ms` | 🟢 Excellent |\n| **5. Canvas Draw** | WebGL / 2D Canvas Compositor | `1.80 ms` | `3.50 ms` | 🟢 Excellent |\n| **Total Frame** | **Full Keystroke-to-Pixel** | **`4.26 ms`** | **`8.83 ms`** | 🟢 **Sub-16ms 60fps** |".to_string(),
+                    ytrace_queries: vec![],
+                    chart: Some("table".to_string()),
+                    live: None,
+                    composed: false,
+                },
+            ],
+        },
+
+        // 4. Fleet Jankbox & Process Reaper
+        Notebook {
+            id: "dash-fleet-jankbox".to_string(),
+            title: "Fleet Jankbox & Process Reaper".to_string(),
+            mode: "dash".to_string(),
+            description: "Identifies runaway child subshells, orphaned test loops, twin duplicate agent processes, and bloated cold transcripts.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-jank-p1".to_string(),
+                    title: "1. Subshell Leaks & Twin Reaping".to_string(),
+                    markdown: "# Fleet Jankbox & Process Reaper\n\n> **Jankbox Definition**: Subshells or twins left running after an agent session disconnects or completes.\n\n### 1-Click Fleet Remediation:\nClick **`[ 🧹 Clean Jankbox ]`** in the dashboard to immediately signal and reap all orphaned child loops across all fleet hosts.".to_string(),
                     ytrace_queries: vec![YtraceQuery {
                         provider: "yggterm".to_string(),
                         category: "row_resource".to_string(),
                         name: "local_hot".to_string(),
                         since_ms: 300_000,
                     }],
-                    chart: None,
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "dash-intelligent-p3".to_string(),
-                    title: "3. Self-diagnosis playground".to_string(),
-                    markdown: "## Self-diagnosis playground\n\nTry it headlessly or via skill:\n\n```sh\nytrace incidents --app yggterm --since 5m --json | jq '.[].payload.diagnosis'\nytrace query --app yggterm --category daemon_request --name status --since 60s --top 5 --json\nytop --probe ytrace --json | jq .incidents\n# as an agent on any host:\n# POST /action notebook_compose_dash {\"title\":\"my incident\", \"ytrace_queries\":[...]}\n```\n\nThe book rule: **Top has no ytrace, Dash is exclusively ytrace.** Compose your profiling adventure as a Dash book page; `ytop --probe` is the discovery front door.".to_string(),
-                    ytrace_queries: vec![],
-                    chart: None,
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — UI Latency & Thread Blocks
-        Notebook {
-            id: "dash-ui-latency-blocks".to_string(),
-            title: "UI Latency & Thread Block Root Cause (200ms Stalls)".to_string(),
-            mode: "dash".to_string(),
-            description: "Investigating the 224-253ms UI thread stalls, level-triggered probe storms, and synchronous file descriptor locks.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "ui-blocks-p1".to_string(),
-                    title: "1. Stalls Exceeding Interactive Budget".to_string(),
-                    markdown: "# UI Latency & Thread Block Investigation\n\n> **Invariant:** The desktop UI thread must never stall for >200 ms (perceptible lag) or >1,000 ms (freeze).\n\nAn off-thread watchdog monitors the UI event loop. When a stall occurs, `ui/block` records the gap duration and the `last_activity` executed prior to the stall.\n\n### Root Cause Breakdown\n1. **Level-Triggered Telemetry Storm**: `web_surface/liveness (stale_detected)` was being evaluated and emitted on *every render frame* for background sessions.\n2. **Uncached Telemetry Appender**: Every single event call invoked `fs::metadata` + `OpenOptions::open`, locking the filesystem synchronously on the UI thread.\n3. **Resolution**: `ytrace::Provider` holds an open file descriptor, and `stale_detected` is edge-triggered / throttled.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "block".to_string(),
-                            since_ms: 7200000,
-                        },
-                    ],
                     chart: Some("table".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "ui-blocks-p2".to_string(),
-                    title: "2. Application Latency Flamegraph".to_string(),
-                    markdown: "## Application Latency Flamegraph\n\n> Hierarchical time distribution across GUI rendering, WebKit IPC, CLI refreshes, and background chores.\n\nNotice the heavy proportion of `render/web_content` and `render/gui` relative to CLI process execution.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "render".to_string(),
-                            name: "gui".to_string(),
-                            since_ms: 7200000,
-                        },
-                    ],
-                    chart: Some("flamegraph".to_string()),
-                    live: None,
+                    live: Some("jankbox".to_string()),
                     composed: false,
                 },
             ],
         },
-        // Dash — Web Surface OSC 7717 & Background Clock Decoupling
+
+        // 5. Autonomous Diagnostic Watchdog
         Notebook {
-            id: "dash-web-surface-liveness".to_string(),
-            title: "Web Surface OSC 7717 & Background Clock Decoupling".to_string(),
+            id: "dash-autonomous-watchdog".to_string(),
+            title: "Autonomous Diagnostic Watchdog".to_string(),
             mode: "dash".to_string(),
-            description: "Investigating false-positive stale event bursts (2,932 events/hr) and foreground vs background read clock transition.".to_string(),
+            description: "Built-in autonomous agent harness evaluating live telemetry invariants and escalating to Interface LLMs.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
                 Page {
-                    id: "ws-liveness-p1".to_string(),
-                    title: "1. The Level-Triggered Storm".to_string(),
-                    markdown: "# Web Surface Liveness Storm\n\n> **Telemetry Analysis**: 2,932 `stale_detected` events were emitted in 60 minutes.\n\n### The Problem\nBackground tabs do not receive live PTY reads, so their `last_seen_ms` appears older than 45 seconds. Sidebar render ticks called `has_live_web_surface` on background tabs, treating expected quiescence as an active fault and firing thousands of duplicate trace events.\n\n### The Fix\nPredicate evaluation is now edge-triggered: only the actively listened session (`reads_since > 0`) emits staleness, with a 30s per-session cooldown.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "web_surface".to_string(),
-                            name: "liveness".to_string(),
-                            since_ms: 7200000,
-                        },
-                    ],
-                    chart: Some("timeseries".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "ws-liveness-p2".to_string(),
-                    title: "2. Clock Invariant (reads_since Grace)".to_string(),
-                    markdown: "## Clock Invariant: reads_since\n\nWhen a background session is foregrounded, its declares haven't arrived yet. Evaluating raw `last_seen_ms` caused the bare terminal to flash for 0–4s before the first heartbeat landed.\n\n`last_seen_ms.max(reads_since)` ensures that switching to a background session provides a fresh 45s grace period for live listening before declaring the surface stale.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "web_surface".to_string(),
-                            name: "liveness".to_string(),
-                            since_ms: 7200000,
-                        },
-                    ],
+                    id: "dash-dog-p1".to_string(),
+                    title: "1. Anomaly Evaluation & LLM Logs".to_string(),
+                    markdown: "# Autonomous Diagnostic Watchdog\n\n> An in-situ autonomous agentic loop evaluating fleet telemetry invariants every 15 seconds.\n\nWhen anomalies are verified across consecutive evaluation cycles, the watchdog files a structured `ytrace` incident (`complaint_for: \"llm\"`) and escalates to the Interface LLM (`gemini-3.7-flash` / `gpt-5.6-luna`) to devise remediation steps.".to_string(),
+                    ytrace_queries: vec![YtraceQuery {
+                        provider: "ytop".to_string(),
+                        category: "watchdog".to_string(),
+                        name: "anomaly".to_string(),
+                        since_ms: 3600_000,
+                    }],
                     chart: Some("table".to_string()),
-                    live: None,
+                    live: Some("watchdog".to_string()),
                     composed: false,
                 },
             ],
         },
-        // Dash — Fleet Health & Incident Spikes
-        Notebook {
-            id: "dash-fleet-health-spikes".to_string(),
-            title: "Fleet Health & Incident Spikes Diagnostics".to_string(),
-            mode: "dash".to_string(),
-            description: "Tracking multi-host telemetry trends, incident rollups, and latency percentiles.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "fleet-health-p1".to_string(),
-                    title: "1. Time-Series Incident Spikes".to_string(),
-                    markdown: "# Fleet Health & Incident Trends\n\n> Rolling time-series buckets aggregating probe counts, span latencies, and incident alerts across all fleet hosts.\n\nInspect the spike at 15:00:00 UTC corresponding to the unthrottled stale probe burst, followed by convergence.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "perf".to_string(),
-                            name: "render".to_string(),
-                            since_ms: 7200000,
-                        },
-                    ],
-                    chart: Some("timeseries".to_string()),
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — ytop Self-Observation
+
+        // 6. ytop Self-Observation (Probes & Latency)
         Notebook {
             id: "dash-ytop-self-observation".to_string(),
-            title: "ytop Self-Observation — Probes, Renders & Event Loop".to_string(),
+            title: "ytop Self-Observation".to_string(),
             mode: "dash".to_string(),
-            description: "ytop observing its own execution timeline via ytrace: host probe cycles, DOM schema assembly, OSC 7717 heartbeats, and action dispatches.".to_string(),
+            description: "Self-observation notebook: ytop traces its own probe cycles, renders, and query latency via ytrace.".to_string(),
             author: "ytop".to_string(),
             created_at_ms: now_ms(),
             pages: vec![
                 Page {
-                    id: "ytop-self-p1".to_string(),
-                    title: "1. Probe Execution Latency (Local & Remote)".to_string(),
-                    markdown: "# ytop Probe Execution Spans\n\n> **Invariant:** Probe execution must remain bounded (<500ms local, <1.5s remote SSH) to prevent dashboard freeze.\n\n`ytop` measures each probe iteration under provider `ytop` with probes `probe/host_local`, `probe/host_remote`, `probe/zfs_iostat`, and `probe/lxc_containers`.\n\n### Observability Query\nRun `ytrace query --app ytop --category probe --since 1h` to inspect probe duration distributions across fleet nodes.".to_string(),
+                    id: "dash-self-p1".to_string(),
+                    title: "1. Self-Observation Probes & Renders".to_string(),
+                    markdown: "# ytop Self-Observation — Probes & Renders\n\n> **In-situ Self-Observation**: ytop registers its own `ytrace::Provider` (`app: \"ytop\"`) to observe probe durations, render timings, and action dispatch latency.\n\nProbes trace local `/proc` delta reads and remote SSH concurrency.\n\nRenders trace viewport JSON and sidebar rail serialization.\n\nActions trace `POST /action` latency.\n\n```sh\nytrace query --app ytop --since 5m --json\nytrace top --app ytop --since 5m\n```".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
                             provider: "ytop".to_string(),
                             category: "probe".to_string(),
                             name: "host_local".to_string(),
-                            since_ms: 3600_000,
+                            since_ms: 300_000,
                         },
-                    ],
-                    chart: Some("timeseries".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "ytop-self-p2".to_string(),
-                    title: "2. Schema Assembly & Viewport Rendering".to_string(),
-                    markdown: "## Schema Assembly & DOM Rendering Flamegraph\n\n> Profiling time spent in `schema::viewport_view` vs `schema::rail_view` vs `schema::notebook_view`.\n\n`render/viewport` measures the schema tree generation. Because ytop is a pure document-surface app, schema assembly is sub-millisecond.".to_string(),
-                    ytrace_queries: vec![
                         YtraceQuery {
                             provider: "ytop".to_string(),
                             category: "render".to_string(),
                             name: "viewport".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("flamegraph".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "ytop-self-p3".to_string(),
-                    title: "3. Action Dispatch & Interactive Events".to_string(),
-                    markdown: "## Action Dispatch & Interactive Events\n\n> Tracing all `POST /action` dispatches: mode toggles, container accordion expands, notebook tab navigation, and jankbox process reaper executions.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "ytop".to_string(),
-                            category: "action".to_string(),
-                            name: "dispatch".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("table".to_string()),
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — exclusively ytrace: common bugs (render storm + session-only branch + titles + input + agy/codex)
-        Notebook {
-            id: "dash-common-bugs".to_string(),
-            title: "Common Bugs — session-only rehydrate + render storm + titles + input + agy/codex".to_string(),
-            mode: "dash".to_string(),
-            description: "The session-only branch that starved keyboard+viewport, the unpinned 54–64 renders/s storm, titles that must never be shorthash/generic, input latency keystroke→pty→render, and agy/codex wiring vs Claude gold — all now ytrace-mirrored for Dash.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "dash-common-p1".to_string(),
-                    title: "1. The session-only branch".to_string(),
-                    markdown: "# The session-only branch\n\n> `retained_rehydrate_should_skip_before_read` returned early when the host was already live — no viewport seed, no `remote_resume_input_ready`. Plain shell never enters this path; agent session always does. The keyboard half is fixed; the paint half (`broken bottom`, `TUI breaks`) is the same branch.\n\n`viewport.rs` now mirrors the trace `ui/terminal_mount/retained_rehydrate_skipped_live_connected` (and `skipped_pre_resize` geometry fence) to ytrace, so Dash can count `skipped_live_connected` vs `skipped_pre_resize==0` in the current generation without tailing trace.\n\nQuery: `ytrace query --app yggterm --category terminal_mount --name retained_rehydrate_skipped_live_connected --since 1h` and correlate against faithful screenshots (`server app screenshot` canvas composite vs `server snapshot` `terminal_lines`). If they coincide, the fix is to seed the viewport on that branch instead of returning — same shape as releasing the input gate.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "retained_rehydrate_skipped_live_connected".to_string(),
-                            since_ms: 3600_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "retained_rehydrate_skipped_pre_resize".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "dash-common-p2".to_string(),
-                    title: "2. The render storm — 54–64 renders/s, one no-op ShellState write per frame".to_string(),
-                    markdown: "# The render storm\n\n> Measured on a client host: `app_render_storm` — Dioxus root at **54–64 renders/s** (calm 0.7–1.2/s) pinning exactly one core for nine minutes, driven by **one `ShellState` write per render that changes no watched field**. Daemon event rate FLAT (13.1/s storming vs 12.1/s calm) — not \"58 rows re-attaching\", but a per-frame write that should not wake the root.\n\n`launch.rs` now emits both `ui/perf/app_render_rate` (every 60 s → `renders_per_sec`) and `render/storm` incident + `ui/render_fail_pattern/detected` `app_render_storm` to ytrace (Wall, always, no sampling), so Dash sees the storm without needing `render_top` deltas.\n\nQuery: `ytrace query --app yggterm --category render --name storm --since 1h` and `ytrace query --app yggterm --category ui --name app_render_rate --since 1h --top 5`; compare `renders_per_sec` trace vs `ytrace query` counts, and run deterministic `mock-tui codex-inline` + `pipeline_integration` harness on a compute host (never the client) to repro the single-branch rehydrate skip without touching the live viewport.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "render".to_string(),
-                            name: "storm".to_string(),
-                            since_ms: 3600_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "app_render_rate".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("sparkline".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "dash-common-p3".to_string(),
-                    title: "3. Titles never shorthash — CLI store → LLM → untitled session → ytrace re-resolve".to_string(),
-                    markdown: "# Titles never shorthash\n\n> Titles must never be `43936dd` (bare hash) or generic `\"Muse Code Stays Attached Daemon\"` / `\"Local Shell Stay Alive Daemon\"`. Wire FROM the CLI store (`TitleAuthority::Store` for muse `session-index.db`, claude `custom-title`, codex `Generated`) and via interface LLM (`request_litellm_title` `gpt-5.6-luna`) when absent/bugged; if LLM fails, title is `\"untitled session\"` (never hash). `ytrace` then re-resolves untitled every tick (`daemon::background_copy_chore` emits `title/resolve_attempt` + `title/untitled_session` incident) until a real title lands — Dash sees the retry timeline without polling the DB.\n\nMuse lifecycle: new row → `\"New Muse Code Session\"` (explicit `set_session_title_explicit` at `terminal new`) → after first prompt `session.jsonl` has user turn → background chore `LIVE_SUMMARY_REFRESH_HORIZON` replaces via `heuristic_title_from_context()` / `request_litellm_title()` → `set_session_title_hint()`; shorthash/generic triggers same path, untitled triggers `ytrace` retry next tick because `\"untitled session\"` is itself a fallback per `titles.rs`.\n\nQuery: `ytrace tail --app yggterm --category title --since 1h --json | jq '.[] | select(.name==\"untitled_session\")'` and `ytrace query --app yggterm --category title --name resolve_attempt --since 1h`".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "title".to_string(),
-                            name: "untitled_session".to_string(),
-                            since_ms: 3600_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "title".to_string(),
-                            name: "resolve_attempt".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "dash-common-p4".to_string(),
-                    title: "4. Input latency — keystroke → PTY → render".to_string(),
-                    markdown: "# Input latency\n\n> Every keystroke must be traceable end-to-end: `shell` `input/keystroke` (client has the bytes) → `daemon` `input/pty` (PTY `terminals.write` accepted) → `shell` `input/render` (`terminal_write_bridge.stage_or_immediate` staged for xterm). Each hop emits `ytrace` `input/*` (`Wall always`, `session_path`, `data_len`) so Dash can compute `pty - keystroke` and `render - pty` p50/p95 per session (like `render/storm` vs `daemon_request/status`). A stuck input gate (`remote_resume_input_ready` false) or lost PTY write (`terminal_write_error` → `recover_terminal_write_lost_runtime`) shows as `keystroke` without `pty`/`render` — the latency tail, not a screenshot, is the falsifier.\n\nProbes wired: `perf.rs: input/keystroke|pty|render` always; `viewport.rs:Input` emits `keystroke`, `daemon.rs:write_local_terminal_with_lost_runtime_recovery` emits `pty`, `viewport.rs:terminal_write_bridge.stage_or_immediate` emits `render`. Query: `ytrace tail --category input --since 5m --json | jq 'group_by(.name) | map({name: .[0].name, count: length})'` to flush out bugs where `keystroke` ≫ `pty` or `render` lags >50 ms.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "input".to_string(),
-                            name: "keystroke".to_string(),
-                            since_ms: 300_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "input".to_string(),
-                            name: "pty".to_string(),
-                            since_ms: 300_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "input".to_string(),
-                            name: "render".to_string(),
                             since_ms: 300_000,
                         },
                     ],
-                    chart: Some("timeline".to_string()),
+                    chart: Some("table".to_string()),
                     live: None,
-                    composed: false,
-                },
-                Page {
-                    id: "dash-common-p5".to_string(),
-                    title: "5. Agy + all CLIs vs Claude gold, codex geometry".to_string(),
-                    markdown: "# Agy + all CLIs vs Claude gold, codex geometry\n\n> `claude-code` is gold: one file per session `~/.claude/projects/*/*.jsonl` (filename IS id), `TitleAuthority::Store` (`custom-title > ai-title`), `id_assigned_at_birth:false` but filename IS id, flag `--resume`. Every other CLI is probed against it:\n\n* **Agy** (`agy` `remote-agy://`/`agy-runtime://` `agy --conversation <id>`) — DB `~/.gemini/antigravity-cli/conversations/*.db` + `brain/*` + `history.jsonl`, `TitleAuthority::Store` (`conversation_summaries.title`). Faults like `muse`: shorthash/generic → `ytrace title/*` (now `cli/agy_title` `no_title_in_store` / `fallback:true` / `is_untitled` in `daemon.rs:collect_live_antigravity_title_syncs`), resume uses `agy-runtime://` + DB `conversation_id` (not row UUID) — verify `remote_runtime_agent_session_key(\"remote-agy://…\")` returns `agy-runtime://<internal-id>` or switch orphans PTY (same `muse` kick, now `ytrace cli/agy_resume`).\n* **Codex** (`remote-session://` historical + `codex-runtime://` `codex resume <id>`, `re_roots_with_cwd:true`) and `codex-litellm` (local-only) — `Generated` titles, store `~/.codex/sessions/**/rollout-*.jsonl` id inside file. Faults are viewport: **geometry squish** (daemon re-creates PTY at `120×36` after hot-update, `last_sent_*` stale-equal) → `viewport.rs:9837` repair now `ytrace cli/codex_geometry` (`stale_cols/rows`, `live_cols/rows`, `codex_squish_repair`); `pi`/`qwen`/`opencode`/`kimi`/`grok` etc. share same `muse`/`agy` title+resume checks (shorthash never shown, `resume` subcommand vs flag, `store_globs` per `AGENT_CLIS`, `re_roots_with_cwd` per arm). Check: `ytrace tail --category cli --since 1h --json | jq 'group_by(.name)'`.\n\nAll faults logged like Muse exemplar: matrix `docs/cli-integration.md` Issue 13/14/15 + this Dash p4/p5.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "cli".to_string(),
-                            name: "agy_title".to_string(),
-                            since_ms: 3600_000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "cli".to_string(),
-                            name: "codex_geometry".to_string(),
-                            since_ms: 3600_000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: None,
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — exclusively ytrace: the supervision system itself, explained then shown live.
-        Notebook {
-            id: "dash-sysinternals".to_string(),
-            title: "yggterm SysInternals".to_string(),
-            mode: "dash".to_string(),
-            description: "The supervision system as a book: the two arming planes, the seat census, when each watcher last fired, the ytrace graphs — and four dream-mode walkthroughs of what the machinery is FOR, each with the live numbers beside it.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "dash-sysint-p1".to_string(),
-                    title: "1. The armings — two planes, and a row can be on one".to_string(),
-                    markdown: "# Two planes, and a row can be on exactly one\n\nThere are two watchdogs over this fleet, and they are **separate stores** rather than two views of\none. A row can be on either, both, or neither, and the four cases behave completely differently\nwhen something goes wrong.\n\n**The booter is a dumb timer, and that is its virtue.** A session SUBSCRIBES to it, and a detached\nwatcher — one that outlives the session — types `continue` when it goes quiet. It has to be\noutside: **a stalled session cannot boot itself**, because the stall *is* the turn ending early, so\nanything scheduled inside the turn is dead in exactly the case that matters.\n\n**The monitor is the judgement.** A timer can ask \"has this been quiet too long\"; it cannot ask\n*why*, and the why decides the action:\n\n* mid-turn and **thinking** — leave it alone\n* mid-turn and **abandoned** — wake it, and from the outside it looks identical to thinking\n* **out of context** — it cannot be woken at all; it has to be relayed to a successor\n* **taken back by a person** — nothing may touch it\n\nThe discriminator between the first two is CPU. A thinking agent burns some; an abandoned one does\nnot. Without that, both collapse into \"do not touch\" — and the abandoned case is precisely the one\nthat needs touching.\n\n## The failure this page exists for\n\nSubscribing to one plane is not subscribing to the other, and one chip cannot say which:\n\n| state | what actually happens when it stalls |\n| :--- | :--- |\n| **both** | it is woken; if the wake does not take, somebody hears about it |\n| **booter only** | it is woken — and if the wake does not take, **the escalation rings into an empty room** |\n| **monitor only** | somebody would hear — but nothing wakes it first, so nothing ever escalates |\n| **neither** | it sits |\n\nBooter-only is the common one, because subscribing is one verb and attaching is another, and a lane\nin a hurry does the first and forgets the second. It is invisible from any pane that renders\nsupervision as a single word.\n\n## Reading the block below\n\n`gone ×N` is **not** a gap — the booter is counting a retired row down and will drop it by itself,\nbecause a corpse must not be booted forever. `lapsed` has already expired on its own. A row on\n**never-arm** is not unsupervised either: that file asserts *a human types at this address*, and the\nbooter's only remedy is to type, so arming one would type into a person.\n\n⛔ **Do not bulk-arm what this page shows.** No probe separates \"nobody ever attached it\" from \"it\nstood itself down deliberately\", and guessing wrong types into somebody. Decide per row.\n\n## Why `ui/block` is the trace on this page\n\nSupervision is not free. Every classification a watchdog makes probes a row, and a probe crosses the\nUI thread of the machine a person is typing on. A rising `ui/block` density with no user-facing\ncause is worth reading against how many rows are armed — the cost of watching is paid in the\nkeyboard latency of whoever is watching.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "block".to_string(),
-                            since_ms: 3600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("armings".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p2".to_string(),
-                    title: "2. The rows — the seat census".to_string(),
-                    markdown: "# The seat census — a seat is an address, not a process\n\nA row is a **seat** in the sidebar; the agent process is a **tenant** of it. The two come apart\nconstantly, and most fleet mistakes live in that gap:\n\n* a seat with **no process** is cold — often perfectly correct, because a lane that finished its\n  work stands down and waits to be folded\n* a **process with no seat** is an orphan, still burning CPU somewhere nobody will ever read\n* **two processes on one seat** is a twin, usually a resume that landed twice; it doubles the cost\n  of the same conversation and neither half knows about the other\n* a **child loop** left behind by a test harness spins forever at the machine's expense\n\n## Context size is not a curiosity, it is the price of the next turn\n\nResuming a cold seat means re-reading its entire context before it can produce a sentence. Past\nroughly 10 MB that read costs more than the work it enables, which is why the right verb for a heavy\ncold seat is *harvest*, not *continue* — page 6.\n\n## What the columns mean\n\n`LIVE ×N` counts **processes, not health** — `×2` is a twin, not twice the work. `cpu` is a sampled\ndelta rather than a `ps` lifetime average, so a seat that burned a core an hour ago and has slept\nsince reads calm here and busy in `ps`; the delta is the live view and `ps` is a biography.\n`last moved` is the transcript's mtime, which a working row touches every few seconds.\n\n`supervision` is the **collapsed, single-plane chip** that the fleet pane shows. Page 1 is the honest\nversion of that same column — the two are on the same shelf deliberately, so the difference between\n\"⚡ Armed\" and *armed on which plane* is one page turn away.\n\n## Why `sidebar/merge_rows` is the trace on this page\n\nIt is what drawing this census costs. It runs on every snapshot, so its p95 is an early warning: a\nmerge that has drifted from single-digit milliseconds into tens means the row plane itself has become\nthe jank, and the seat count is the first thing to look at.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "sidebar".to_string(),
-                            name: "merge_rows".to_string(),
-                            since_ms: 3600000,
-                        },
-                    ],
-                    chart: Some("sparkline".to_string()),
-                    live: Some("census".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p3".to_string(),
-                    title: "3. When each last fired — and silence has no symptom".to_string(),
-                    markdown: "# When each last fired\n\nEvery watcher here fails the same way: **it stops, and stopping looks exactly like a calm fleet.**\nNo error, no alert, no missing pane — just nothing, which is also what a healthy quiet hour produces.\nThe only instrument that separates them is a clock, which is why this page is a table of timestamps\nrather than a table of statuses.\n\n## The four cadences\n\n| watcher | the question it asks | cadence |\n| :--- | :--- | :--- |\n| **booter** | has this row been quiet too long | a pass every few minutes, per subscriber |\n| **monitor** | *why* is it quiet, and who should hear | the same order, plus a deliberately long escalation window |\n| **roll watcher** | has `main` moved past the daemon that is running | hourly |\n| **fold sweep** | which rows are finished, stalled or dead | rides the roll watcher's tick |\n\nThe monitor's escalation window is long **on purpose**. A finished relay row idles by design;\nescalating it after four minutes produced three false alarms inside one minute, so the window is\nfifteen. A watchdog that cries at every rest is uninstalled within a day, which is a worse outcome\nthan a slow one.\n\n## ⛔ Alive is not audible\n\nThe booter reports **two** instants: when its loop last ticked, and when it last managed to write to\nits log. A process ticking into a file nobody can read supervises nobody, and from outside it is\nindistinguishable from a healthy one — same process, same CPU, same uptime. The pair is the only\nthing that catches it.\n\n**The other three have no heartbeat file.** Their row below is the mtime of a log, which says the log\nmoved — not that the loop is well. That is weaker evidence and it is labelled as such rather than\nrounded up to a green tick.\n\n## Why `heartbeat/panic` is the trace on this page\n\nIt is the daemon's own host-health complaint: sustained memory, sustained cores, UI-block density,\nruntime tmpfs growth. It belongs here because **a watcher that has stopped and a host that has fallen\nover produce the same silence**, and this is the series that tells the two apart.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "heartbeat".to_string(),
-                            name: "panic".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("watchers".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p4".to_string(),
-                    title: "4. The graphs — what the fleet costs, over time".to_string(),
-                    markdown: "# The graphs\n\nDash is exclusively ytrace, so every series here is a file-first read of `ytrace.jsonl`. Nothing is\nsampled from `ps` and nothing is asked of the daemon — the trace survives the daemon being down,\nwhich is exactly the moment a person most wants to know what happened.\n\n## What to look at, and in what order\n\n1. **`ui/block` over time.** A block is the UI thread stalling long enough to be felt. **Density\n   matters more than any single spike** — a rising tail precedes a freeze. Blocks caused by an agent\n   probing rows are indistinguishable from blocks caused by the app itself, so read the shape against\n   page 1's arming count before blaming the app.\n2. **`daemon_request` latency.** The request path everything else rides on. `snapshot` is polled\n   continuously, so its p95 is the fleet's floor: when it moves, everything moves.\n3. **`render` cost.** Split by clock. `cpu` rows are CPU time, `wall` rows are elapsed — a render\n   that *waited* is cheap on one and expensive on the other, and mixing them is how a busy GUI gets\n   called idle.\n4. **`heartbeat/panic`.** Host level, not app level. When this is firing, everything above it is a\n   symptom rather than a cause.\n\n## How to read a sparkline honestly\n\nEach is normalised against **its own** peak, and the peak is printed beside it. Two lines of equal\nheight are not equal magnitudes. An empty bucket draws as the floor and means *nothing happened* —\nnever *it got faster* — so read the sample count before the shape.\n\n## ⛔ What is missing here, and it is a real gap rather than a design\n\n**The two watchdogs emit no ytrace at all.** Their wakes, their escalations and their rate-limit\nholds exist only as lines in a log, which is why page 5 is parsed prose instead of a series. Until\nthey emit spans, a wake cannot be correlated against the `ui/block` it caused — and that correlation\nis the entire reason for putting supervision and profiling on one Dash.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "block".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "daemon_request".to_string(),
-                            name: "snapshot".to_string(),
-                            since_ms: 7200000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "render".to_string(),
-                            name: "gui".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("sparkline".to_string()),
-                    live: Some("graphs".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p5".to_string(),
-                    title: "5. Dream — a lane stalls, and something outside it wakes it".to_string(),
-                    markdown: "# Dream 1 — a lane stalls, and something outside it types `continue`\n\n**The story.** A lane on seat `4.3` is halfway through a build. Its turn ends early — no error, no\ncrash, the model simply stopped. Nothing inside the session can help, because everything inside the\nsession ended when the turn did. The detached watcher notices the transcript has not moved for longer\nthan its window, classifies the row, and writes one `continue` **to the PTY, not to the composer** —\nthe composer belongs to whoever is typing, and a write there races the agent's own input. Sessions\nhave refused a composer submit for thirty seconds each and taken a PTY write instantly.\n\nIf the wake takes, the lane resumes and nobody was ever involved. If it does not, the second plane\nearns its keep: the monitor escalates to the campaign's orchestrator, which can probe, read and\ndecide — or to a person when there is no orchestrator to carry it.\n\n**What makes it work:** the watcher is outside the thing it watches.\n**What makes it fail:** the lane was armed on the booter and attached to nothing, so the escalation\nhad nowhere to go — page 1.\n\n## The verdicts, and why each has its own remedy\n\n| verdict | remedy |\n| :--- | :--- |\n| `WORKING` | nothing |\n| `IDLE` | wake once; escalate if it stays idle past the window |\n| `STUCK` | mid-turn and **not** burning CPU — abandoned, so wake it |\n| `RATE_LIMITED` | ⛔ **do not wake.** The account cannot spend; the session is fine. A boot here burns a refused turn and teaches nothing. One sighting holds the **whole fleet**, because a rate limit is account-wide while detection can only ever be per-row. |\n| `NO_TRANSCRIPT` | ⛔ not \"idle\" — nothing could be read, and \"I could not look\" is not a measurement |\n| `SKIP:draft-race` | the row had unsent text; typing would have raced a person mid-sentence |\n\n**An escalation is a fact, not a failure.** A row that escalated is one a person or an orchestrator\nnow owns, and the booter deliberately stops booting it — two watchdogs and a human all typing into\none row is worse than none of them.\n\n## Why `ui/block` is the trace on this page\n\nA wake is a write into a live terminal on the machine somebody is using. The blocks around a burst of\nwakes are the cost of the safety net, and they are the honest argument for why the watchers should\nnot be armed over rows nobody is supervising.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "block".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("wakes".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p6".to_string(),
-                    title: "6. Dream — a lane goes cold, and is harvested rather than prompted".to_string(),
-                    markdown: "# Dream 2 — a lane goes cold, and is harvested rather than prompted\n\n**The story.** Seat `4.7` has been quiet for hours. Its process is gone. Its transcript is 34 MB. The\ntempting move is to resume it and ask what it was doing.\n\n⛔ **That question is the most expensive thing on this page.** Resuming a cold seat re-reads its\nentire context before it can produce a single sentence, and what comes back is a self-report that\ncannot be verified anyway. **The asking IS the expense** — what you are buying is the wake, not the\nanswer.\n\n**The cheaper path, in order, and it is cheapest-first on purpose:**\n\n1. **mtime** — how cold is it actually\n2. **size** — what would a wake cost\n3. **what it was TOLD** — the instructions in the transcript are the highest signal per byte in the\n   file\n4. **its last prose turn** — a working lane's own status report, already written down\n5. **what it DID** — the files it wrote, the commits it made\n\nA transcript says what a session *believed*; a commit says what it *did*. **The artefact wins.** Two\nlanes have been told apart, their roles established and one safely retired, from six extracted lines\nout of megabytes of transcript.\n\nThen the seat is folded (page 8) and a successor is claimed with a brief distilled from those\nartefacts — so the successor needs no history at all, which is the whole point of harvesting rather\nthan resuming.\n\n## ⛔ And swallowing it whole is the other failure\n\nReading the entire transcript instead of asking it moves the same cost into *your* context and\ncarries it for the rest of the session, when the signal you wanted was in the last one per cent.\nBoth mistakes look like diligence. **Extract, do not ingest.**\n\n## The chips\n\n`⚠️` above 10 MB, `🚨` above 30 MB. They are not health warnings about the lane — the lane may have\ndone excellent work. They are the price of the decision you are about to make about it.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "daemon_request".to_string(),
-                            name: "status".to_string(),
-                            since_ms: 3600000,
-                        },
-                    ],
-                    chart: Some("table".to_string()),
-                    live: Some("cold".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p7".to_string(),
-                    title: "7. Dream — a roll lands, and the client restarts under it".to_string(),
-                    markdown: "# Dream 3 — a roll lands, and the client is restarted under it\n\n**The story.** `main` moves ahead of the daemon that is actually running. Nobody notices, because\n**a stale daemon works perfectly** — it simply works like last week. Rows keep being served by a\nbinary whose bugs are fixed upstream and whose fixes are not present, and every report filed against\nit is a report about a version nobody is developing any more.\n\nThe roll watcher compares the two hashes on its own cadence, builds, deploys to every host, and\nrecords what landed. The restart is the part that needs care, because it lands on the machine a\nperson is typing at — so it is a scheduled event with a ledger, not a surprise.\n\n## Why a ledger, rather than \"just check the version\"\n\nA version string says what a binary *claims*. The ledger says **when, which lane, which hosts, which\nbuild, which version** — so a bug report can be pinned to the build that was live when it was filed.\nWith several hosts each holding several checkouts, an unpushed commit is not \"not yet shared\", it is\na **divergence somebody reconciles by hand later**, usually without knowing which side is newer.\n\n⛔ **A roll must never type into a row a human attends.** The never-arm list is consulted before\nanything is restarted, and a graceful handover types nothing at all — it lets the sessions land on\nthe new binary at their own next turn.\n\n## Why `daemon_request/hot_restart` is the trace on this page\n\nIt is the restart itself, timed. It is measured in **seconds, not milliseconds**, and that number is\nthe fleet's whole tolerance for rolling: while it is small the roll is invisible, and when it grows\nthe roll stops being maintenance and becomes an interruption somebody will start avoiding.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "daemon_request".to_string(),
-                            name: "hot_restart".to_string(),
-                            since_ms: 86400000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("rolls".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-sysint-p8".to_string(),
-                    title: "8. Dream — a row is folded, and its worktree with it".to_string(),
-                    markdown: "# Dream 4 — a row is folded, and its worktree with it\n\n**The story.** A lane finishes, announces that it is done, and stands down with nobody coming after\nit. Its seat stays in the sidebar. Its process stays resident. The booter goes on arming a corpse.\nNothing anywhere says so — and within an hour the sidebar has refilled with quiet corpses that all\nlook like working lanes.\n\n**Retiring a row is four planes, not one:**\n\n1. the **row** is delisted\n2. the **monitor**'s subscribers are moved off it\n3. the **booter** is disarmed for it\n4. the **agent process** is reaped\n\nThe fourth is not defensive programming. `session remove` reports the **request**, not the effect,\nand routinely delists a row whose agent keeps running — so a fold that skips step four produces\nexactly the orphan it was meant to prevent.\n\nAll four steps existed for a long time in exactly one place: as a side effect of a *successor*\nclaiming a seat. So the fleet had a `replace` and no `fold`, and a lane that finished with nobody\ncoming after it had no path to being retired at all.\n\n## ⛔ A stall is not a fold\n\nA lane that has merely paused, with work still assigned, needs **one `continue`** — folding it throws\naway a lane that was fine. So STALLED is its own verdict with its own remedy, and it is acted on once\nper stall rather than once per sweep.\n\nAnd **a lane that simply stops, announcing nothing, is the common case.** An early version of this\nsweep required an announcement before it would call anything finished, and therefore classified every\nsilent corpse as WORKING forever.\n\n## The worktree half of the same sweep\n\nA folded lane usually leaves a git worktree behind. It is removed only when it is genuinely spent:\n⛔ **unpushed commits, or a live process standing in it, means KEEP** — whatever the row's state.\n**A fold may never be the thing that loses work.**\n\n## Dry by default\n\nFolding kills somebody's agent. It may never be the accidental outcome of a mistyped flag, so the\nsweep classifies and changes nothing until it is told a second time.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "sidebar".to_string(),
-                            name: "merge_rows".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("table".to_string()),
-                    live: Some("folds".to_string()),
-                    composed: false,
-                },
-            ],
-        },
-        // Top — Legendary Bugs, the kernel half.
-        Notebook {
-            id: "top-legendary-bugs".to_string(),
-            title: "Legendary Bugs — the kernel half".to_string(),
-            mode: "top".to_string(),
-            description: "LEGENDARY is an owner-set priority: a defect that makes the product unusable. This shelf carries the kernel end of the chain — the processes a mount creates, the pressure it completes under, and ⛔ the kernel-call probe that is detected and never run.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "top-legendary-p1".to_string(),
-                    title: "1. What LEGENDARY means, and the chain".to_string(),
-                    markdown: "# Legendary Bugs — the kernel half\n\n**LEGENDARY is a priority, not a status.** It marks a defect that makes the product unusable for the\nperson using it, and it outranks every other open entry however tractable those are. A lane may not\npark a LEGENDARY item behind easier work, and an entry becomes or stops being LEGENDARY only on the\nowner's word.\n\nThis book has two halves because the bug does. The chain a keystroke and a glyph travel is\n\n    kernel → daemon → client → xterm.js → pixel\n\nand it is instrumented by five different layers that have never been read in one place — so each\ninvestigation re-derives it from a trace file, gets as far as its own layer, and files something the\nnext one cannot build on. **This shelf carries the kernel end.** Its twin on the Dash shelf,\n*Legendary Bugs — the yggterm half*, carries the rest.\n\n## ⛔ The rule that shapes every page in both halves\n\n**A missing probe and a quiet system look identical.** A page rendering `0` for a link nobody ever\ninstrumented is not reporting health — it is reporting its own blindness in the costume of health,\nand this is the failure that keeps getting paid for. So every block distinguishes three states and\nnever collapses them into two:\n\n| | |\n| :--- | :--- |\n| ✅ **seen** | the probe exists and fired here, with a count |\n| ⚠ **named, not seen** | the probe exists and was silent — which may be good news |\n| ⛔ **no probe** | nothing would have recorded this even if it happened |\n\n## Why the kernel end is thinner than the yggterm end\n\nTwo reasons, and only one of them is a defect.\n\nThe **shelf rule** is that Top takes no ytrace at all: it reads `probe.rs`, a 400 ms `/proc` delta,\nand nothing else. That is deliberate. Top is host truth, and a host atlas that depended on an\napplication's own tracing would go blank exactly when that application did — which is the moment you\nneed it.\n\nThe **defect** is that ytop makes no kernel call of its own. It detects `bpftrace`, `perf` and\n`bpftool`, and never runs them. Links 1 and 2 of the chain are therefore *declared* rather than\nmeasured, and page 3 writes that out in full — because the difference between \"the kernel was quiet\"\nand \"nobody asked the kernel\" is the difference this whole book is about.".to_string(),
-                    ytrace_queries: vec![],
-                    chart: None,
-                    live: Some("chain_map".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "top-legendary-p2".to_string(),
-                    title: "2. The kernel half of a mount".to_string(),
-                    markdown: "# The kernel half of a mount\n\nWhen a row is re-mounted, something concrete happens on this machine: a PTY child is forked and\nexec'd, a terminal buffer is allocated, and the row's screen is read back from disk before a single\nglyph can be drawn. This page is what that costs, measured the only way this shelf is allowed to\nmeasure it.\n\n## What a 400 ms sampler can see, and what it cannot\n\nIt sees **pressure** — cores, load, memory, and the pool the read comes from — and pressure is\ngenuinely diagnostic here rather than background colour. A mount that has to complete on a loaded\nmachine takes longer to paint, and a longer interval between the old surface disappearing and the new\none arriving is precisely the **ghost frame** the Dash half measures. The two halves meet at that\nnumber.\n\n⛔ **It cannot see the mounts themselves.** A `/proc` walk every 400 ms cannot observe a process that\nlives 40 ms, and the fork/exec under a mount is that short. So a mount storm appears here as a raised\nfloor and never as individual events. The instrument that would see them is on the next page, and it\nis not installed.\n\n## Reading the process table\n\n`cpu` is a **sampled delta**, not a `ps` lifetime average. A process that burned a core an hour ago\nand has slept since reads calm here and busy in `ps` — the delta is the live view, `ps` is a\nbiography. That distinction is load-bearing for this particular bug: the churn is bursty, and a\nlifetime average smears a burst into invisibility.\n\n## The disk half\n\nA mount that replays a row's screen reads it from disk. A pool under load is therefore a slow mount,\nand a slow mount is a longer blank. That is why the storage numbers are on this page rather than\nfiled under housekeeping.".to_string(),
-                    ytrace_queries: vec![],
-                    chart: None,
-                    live: Some("kernel_half".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "top-legendary-p3".to_string(),
-                    title: "3. ⛔ The kernel-call probe is declared, not run".to_string(),
-                    markdown: "# ⛔ The kernel-call probe is declared, not run\n\nThe end-to-end tracing this notebook exists for begins with a kernel call. **ytop does not make one.**\nIt runs `which` against three tools and reports whether they are on `PATH`.\n\nThat is not a small distinction dressed up as one. `ebpf_available: true` renders as a healthy-looking\nfact, and it means only that a binary exists: no probe was attached, nothing was sampled, and not one\nkernel event has ever been recorded by this program. A reader who takes it for a measurement has been\nmisled by the pane rather than by the system — which is why this page spells it out instead of showing\na green chip.\n\n## What closing it would settle\n\nEach of these answers a question that is currently settled by inference, which is to say not settled:\n\n* **`sched_switch` on the client's UI thread** — is a freeze the application blocking, or the kernel\n  declining to schedule it? The `ui/block` probe on the Dash side records the *gap* and cannot say\n  which side of it was at fault, so every freeze investigation begins by guessing.\n* **`sched_process_fork` / `exec`** — how many processes a mount storm actually creates. This is the\n  one the 400 ms sampler structurally cannot answer, however long you watch it.\n* **`zfs_delay` and the block layer** — is a slow mount waiting on the pool, or on the daemon?\n* **`io_uring` submit and complete** — where a stalled write is parked.\n\n## ⚠ This is a gap in ytop, not in the fleet\n\nThe tools are installed on the hosts that have them. What is missing is anything in this program that\nruns one and files the result as a reading. Until that exists, **treat every zero on this shelf about\nkernel behaviour as ytop's silence rather than the kernel's** — and note that this page is itself the\nmodel for how the rest of the book reports a gap: name it, price it, and refuse to draw it as calm.".to_string(),
-                    ytrace_queries: vec![],
-                    chart: None,
-                    live: Some("ebpf_gap".to_string()),
-                    composed: false,
-                },
-            ],
-        },
-        // Dash — Legendary Bugs, the yggterm half.
-        Notebook {
-            id: "dash-legendary-bugs".to_string(),
-            title: "Legendary Bugs — the yggterm half".to_string(),
-            mode: "dash".to_string(),
-            description: "The mount churn, the ladder a mount stops on, ghost frames and broken paint, input blocking — and the map of where the kernel→daemon→client→xterm.js→pixel chain has no probe at all, because a missing probe and a quiet system look identical.".to_string(),
-            author: "ytop".to_string(),
-            created_at_ms: now_ms(),
-            pages: vec![
-                Page {
-                    id: "dash-legendary-p1".to_string(),
-                    title: "1. The mount churn — rows nobody is looking at".to_string(),
-                    markdown: "# The mount churn\n\n**A row nobody is looking at is torn down and re-mounted, and a mount begins with an EMPTY surface.**\nThose two facts together are the mechanism behind \"the viewport went blank\": nothing has to fail for\nthe screen to be empty. The mount simply starts that way, and the row is being re-mounted for reasons\nthat have nothing to do with the person watching it.\n\nThe measurement that promoted this to LEGENDARY — one 1.3-minute window, those rows untouched:\n\n| what | count in 1.3 min |\n| :--- | ---: |\n| full mounts (`terminal_mount/begin`) | 5 |\n| `terminal_mount/bootstrap_reset` | 7 |\n| …of those, landing on a row nobody was looking at | 3 |\n| `session/request_terminal_launch_for_active_begin` | 13 |\n| distinct rows involved | 3 |\n\n⇒ roughly **one re-mount every twenty seconds**, on rows nobody had asked for.\n\n## ⭐ The narrowing: it tracks the row SET, not the clock\n\nThe churn is not a background loop on a timer. Over a longer window with the trace open, most\n`bootstrap_reset`s fell within six seconds of a **row-set change** — a `create_terminal` or a\n`remove_session`. A forty-one-second stretch in which nothing touched the row set produced **zero**\nresets, while the periodic snapshot refresh went on ticking throughout. That stretch is the control,\nand it rules the refresh out as a driver on its own.\n\n⛔ **And a falsifier that came back negative, kept because it narrows the target rather than widening\nit.** One `set_session_outline` into a quiet GUI, setting a value that was already set, produced no\nreset and no launch in the twelve seconds after. So it is not \"any app-control mutation\": an\n**attribute** change is free, and what costs a re-mount is the row **set** changing.\n\n⚠ **That makes ordinary housekeeping a cause of the symptom.** Folding finished rows, spawning lanes\nand reseating them are all row-set changes, so a session doing its job makes the window flash for as\nlong as it is working. That is not an argument for doing less of it — it is the reason this entry\noutranks everything else in the queue.\n\n## What the block below adds\n\nIt recomputes the correlation **here, on this host, in this window**, instead of repeating the numbers\nabove. A written measurement is evidence about the moment it was taken; the same measurement recomputed\nis evidence about now — and where the two disagree, that disagreement is the finding.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "bootstrap_reset".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "app_control".to_string(),
-                            name: "request_begin".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("churn".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-legendary-p2".to_string(),
-                    title: "2. A mount begins empty — the ladder, and the rung it stops on".to_string(),
-                    markdown: "# The ladder a mount climbs\n\nA mount is not one event, it is a ladder: the surface is created empty, a terminal is ensured, a\nbootstrap is scheduled, a JS terminal object is created, xterm.js reports ready, a stream attaches,\nbytes arrive, and finally bytes arrive that are **not protocol noise**. Only that last rung means a\nperson has something to look at.\n\n⇒ So the useful question about a blank viewport is never *\"did it error\"* — usually nothing did. It\nis **how far up the ladder did it get**, and the drop between two rungs is where blank lives.\n\n## Why `first_meaningful_output` is the rung that matters\n\n`first_output` fires for the first bytes of any kind, and a terminal handshake is bytes. A mount can\nreach `first_output`, look entirely healthy in a trace, and still be showing an empty rectangle.\n`first_meaningful_output` is the one that separates \"the pipe is connected\" from \"there is something\non the screen\", and the gap between those two counts is the population of blank surfaces.\n\n## The recovery ladder underneath\n\nA second set of probes exists purely to notice a blank surface and fight it: settle-waits, snapshot\nreplays, poison recovery, resume recovery, forced reveals. They are not idle.\n\n⭐ **A busy recovery ladder is not reassurance.** It means blankness is being detected and contested\nrepeatedly, and lost often enough to matter. **Curing the churn removes the need for most of this\nmachinery; curing the machinery alone leaves the churn paying for it forever** — which is why the\ntarget moved from \"make the re-ask ladder converge\" to \"stop re-mounting rows nobody asked for\".".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "begin".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "first_meaningful_output".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("mount_ladder".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-legendary-p3".to_string(),
-                    title: "3. Ghost frames and broken paint — the xterm.js half".to_string(),
-                    markdown: "# Ghost frames and broken paint\n\nTwo symptoms reported from the seat, both classed as **input-blocking** defects: ghost frames and\nfreezes while switching between rows, and TUI paint arriving broken on a switch.\n\nThey are recorded against the churn rather than as separate entries, because **a switch IS a mount**.\nA ghost frame is the previous row's surface still on screen while the new mount has not painted;\nbroken paint is a mount that painted partially. Both are what \"a mount begins with an empty surface\"\nlooks like to the eye rather than to a trace. ⚠ If they turn out to have independent roots they split\nout — but filing three entries for one symptom chain is what made this look half-fixed once already.\n\n## ⛔ A correction this page carries against the written entry\n\nThe entry records that the xterm.js half is the gap, and that a partially-painted frame and a fully\npainted one are indistinguishable. **On this host that is not so.** `xterm_render/frame_gap` carries\n`rows_painted` against `rows`, and `frame_window` carries `full_canvas_frames` against `count`. The\npaint layer *is* instrumented, and the block below counts partial paints directly.\n\n⇒ Which relocates the real gap. What is missing is not paint instrumentation but **the link from a\npainted frame back to the bytes that caused it** — a frame id carried from the write to the paint. Without\nit, a frame that painted the wrong thing and a frame that painted the right thing are identical.\n\n## ⛔ And one trap in the data itself\n\n`frame_gap` is **threshold-gated**: it only fires above a fixed gap. So it counts *late* frames and\ncan say nothing whatever about how many frames were on time, and dividing it by anything to get a\npercentage produces a number with no meaning. `frame_window` is the honest denominator — it is the\nperiodic rollup and fires regardless.\n\nA median late-frame gap of several hundred milliseconds is long enough for a person to see the\nprevious row's content sitting where the new one should be. That is the ghost, measured.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "xterm_render".to_string(),
-                            name: "frame_gap".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_js".to_string(),
-                            name: "xterm_write_flush".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("sparkline".to_string()),
-                    live: Some("paint_chain".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-legendary-p4".to_string(),
-                    title: "4. Input blocking — the class both symptoms were filed under".to_string(),
-                    markdown: "# Input blocking\n\nGhost frames, freezes and broken TUI paint are all filed as **input-blocking** defects, and that is\nnot loose language. While the surface is wrong, typing into it is either impossible or unsafe — and a\nperson who cannot trust what is on screen stops typing, which is the product being unusable rather\nthan merely flawed.\n\n## The chain a keystroke should be traceable along\n\n`input/keystroke` (the client has the bytes) → `input/pty` (the write was accepted) → `input/render`\n(staged for xterm.js). Three hops, three probes, and in principle two latencies.\n\n⛔ **In practice they do not count the same population, and the block below says so when it detects\nit.** `input/pty` counts every write into a PTY, and on a fleet almost all of those are an agent's own\noutput rather than a person's fingers. So `pty ÷ keystroke` is not a delivery rate and the difference\nis not lost input. Computing an end-to-end keystroke latency needs a **keystroke id carried through to\nthe render that displays it**, which does not exist — and it is a much smaller change than it sounds.\n\n## What is actually holding the thread\n\n`ui/block` records the UI thread stalling long enough to be felt, with the last activity before the\ngap as its `subject`. The density matters more than any single spike: a rising tail precedes a freeze.\n\n⚠ **Some share of these blocks are `app_control/*` — agent probes, none of them the user's, and the\nblock below measures which share rather than asserting one: it moves with how many agents are\nlooking at the GUI at the time.** Every\nread an agent makes of the GUI is paid for in the typing latency of whoever is at the keyboard. That\nis why the standing instruction is to batch reads and prefer the trace file to a live probe, and why\nthis notebook's own blocks are cached and refreshed off-thread rather than drawn on every render.\n\n⛔ **A block with no subject is not an unimportant one.** It is one where the last activity before the\ngap went unrecorded — so it is precisely the block nobody can chase, and it is usually the largest\nbucket on the page.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "input".to_string(),
-                            name: "pty".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "ui".to_string(),
-                            name: "block".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("timeline".to_string()),
-                    live: Some("input_chain".to_string()),
-                    composed: false,
-                },
-                Page {
-                    id: "dash-legendary-p5".to_string(),
-                    title: "5. ⛔ Where the chain has no probe".to_string(),
-                    markdown: "# Where the chain has no probe\n\nEvery other page in this book is a count. **This one is the map of what those counts can and cannot\nmean**, and it is the page the notebook exists for.\n\nThe claim behind end-to-end observability is that with tracing at this depth no bug survives — and it\nis true, *provided the probes are right*. The failure mode is not a wrong number; it is an absent\nprobe rendering as a confident zero. A quiet link and an uninstrumented link produce identical\nevidence, and only a map like this one tells them apart.\n\n## How to read the state column\n\n* ✅ **seen** — the probe exists and fired in this window, with a count. Trust the number.\n* ⚠ **named, not seen** — the probe exists in code and was silent. This may be good news, or it may\n  mean the feature never ran, or that retention already rolled the window away. Three different\n  things a zero cannot separate.\n* ⛔ **no probe** — nothing would have recorded this even if it happened. **No number on this row is\n  ever evidence of anything.**\n\n## The two gaps worth closing first, and they are both cheap\n\n**An origin field on activation.** Whether the *active* row also changes by itself is unestablished\nand must not be asserted either way: a person clicking between rows and an application-driven switch\nproduce an identical trace, so no instrument here separates them. Until an activation event carries\nits origin — user gesture or internal — every future investigation re-argues this from the same\nambiguous evidence and reaches the same non-conclusion.\n\n**A frame id from write to paint.** It closes the last measurable link, turning \"a frame was painted\"\ninto \"*this* frame showed *those* bytes\" — which is what distinguishes broken paint from a paint that\nnever happened.\n\n⛔ **The last link cannot be closed from inside the application at all.** Everything the trace can say\nis that the software believed it painted. Only a screenshot correlated to a frame id, or a camera,\nsays a person saw it — and the gap between those two is where a LEGENDARY bug lives, because it is\nexactly the gap between what the instruments report and what the person in the chair experiences.".to_string(),
-                    ytrace_queries: vec![
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "terminal_mount".to_string(),
-                            name: "js_ready".to_string(),
-                            since_ms: 21600000,
-                        },
-                        YtraceQuery {
-                            provider: "yggterm".to_string(),
-                            category: "xterm_render".to_string(),
-                            name: "frame_window".to_string(),
-                            since_ms: 21600000,
-                        },
-                    ],
-                    chart: Some("table".to_string()),
-                    live: Some("probe_gaps".to_string()),
                     composed: false,
                 },
             ],

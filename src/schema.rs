@@ -148,41 +148,38 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
         widgets.push(label(notice.clone()));
     }
 
-    // ── 1. TOP ROWS: RESERVED FOR MACHINES & FLEET METADATA ──
-    widgets.push(section(
-        if view.mode == MODE_TOP { "Connected Machines" } else { "Fleet Machines & Context" },
-        false,
-    ));
-
-    for m in machines {
-        let p = m.principal();
-        let host = p["host"].as_str().unwrap_or("?");
-        let shown = p["label"].as_str().unwrap_or(host);
-        let cpu = p["cpu_busy_pct"].as_f64().unwrap_or(0.0);
-        let mem_total = p["mem_total_kb"].as_i64().unwrap_or(0);
-        let mem_avail = p["mem_available_kb"].as_i64().unwrap_or(0);
-        let mem_used = (mem_total - mem_avail).max(0);
-        let is_selected = host == view.selected_host || (view.selected_host == fleet::LOCAL && host == "local");
-
-        let subtitle = if m.reachable() {
-            format!("{cpu:.0}% CPU · {} RAM", gb(mem_used))
-        } else {
-            "unreachable".to_string()
-        };
-
-        widgets.push(json!({
-            "kind": "list-row",
-            "id": format!("host:{host}"),
-            "title": shown,
-            "subtitle": subtitle,
-            "icon": "server",
-            "status": if m.reachable() { "durable" } else { "danger" },
-            "selected": is_selected,
-            "row_action": format!("select_host:{host}"),
-        }));
-    }
-
+    // ── 1. TOP MODE: RESERVED TOP PARTITION (≤30% AREA) FOR CONNECTED FLEET ──
     if view.mode == MODE_TOP {
+        widgets.push(section("🌐 Connected Fleet", false));
+
+        for m in machines {
+            let p = m.principal();
+            let host = p["host"].as_str().unwrap_or("?");
+            let shown = p["label"].as_str().unwrap_or(host);
+            let cpu = p["cpu_busy_pct"].as_f64().unwrap_or(0.0);
+            let mem_total = p["mem_total_kb"].as_i64().unwrap_or(0);
+            let mem_avail = p["mem_available_kb"].as_i64().unwrap_or(0);
+            let mem_used = (mem_total - mem_avail).max(0);
+            let is_selected = host == view.selected_host || (view.selected_host == fleet::LOCAL && host == "local");
+
+            let subtitle = if m.reachable() {
+                format!("{cpu:.0}% CPU · {} RAM", gb(mem_used))
+            } else {
+                "unreachable".to_string()
+            };
+
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("host:{host}"),
+                "title": shown,
+                "subtitle": subtitle,
+                "icon": "🖥",
+                "status": if m.reachable() { "durable" } else { "danger" },
+                "selected": is_selected,
+                "row_action": format!("select_host:{host}"),
+            }));
+        }
+
         if view.adding_machine {
             widgets.push(section("➕ Add SSH Machine", true));
             widgets.push(json!({
@@ -226,30 +223,11 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
                 "action": "add_machine_prompt",
             }));
         }
-    } else {
-        // Dash Mode Fleet & Supervision Status Row
-        let (sup_status, sup_title, sup_action) = if let Some(hold) = &report.quota_hold {
-            ("warning", format!("⏸ Quota Hold: {hold}"), "quota_release")
-        } else if report.leak_count > 0 || report.twin_count > 0 {
-            ("danger", format!("⚠️ Jankbox: {} leaks · {} twins", report.leak_count, report.twin_count), "clean_jankbox")
-        } else {
-            ("durable", format!("🛡️ Supervision: Active · {} Live / {} Seats", report.live_count, report.total_rows), "quota_hold")
-        };
-
-        widgets.push(json!({
-            "kind": "list-row",
-            "id": "dash_fleet_supervision_chip",
-            "title": sup_title,
-            "subtitle": format!("Context: {:.1} MB · Agent CPU: {:.1}%", report.total_transcript_mb, report.total_agent_cpu_pct),
-            "icon": "zap",
-            "status": sup_status,
-            "row_action": sup_action,
-        }));
     }
 
     // ── 2. NOTEBOOK ROWS (BOOKSHELF IN LIVE-SESSIONS VOCABULARY) ──
     widgets.push(section(
-        if view.mode == MODE_TOP { "📚 Host Atlas Notebooks" } else { "📚 Profiling Notebooks (Dash)" },
+        if view.mode == MODE_TOP { "📚 Operational Notebooks" } else { "📚 Application Observability Notebooks" },
         false,
     ));
 
@@ -261,7 +239,7 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
             "id": format!("notebook:{}", nb.id),
             "title": nb.title.clone(),
             "subtitle": format!("{} pages · {}", nb.pages.len(), nb.author),
-            "icon": "book",
+            "icon": "icon:folder",
             "status": if is_selected { "durable" } else { "transient" },
             "selected": is_selected,
             "depth": 0,
@@ -273,10 +251,11 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
             for (idx, page) in nb.pages.iter().enumerate() {
                 let selected_page = is_selected && view.selected_page.as_deref() == Some(&page.id);
                 let page_icon = match page.chart.as_deref() {
-                    Some("flamegraph") => "flame",
-                    Some("timeseries") | Some("timeline") => "chart",
-                    Some("table") | Some("top_table") => "terminal",
-                    _ => "file",
+                    Some("flamegraph") => "🔥",
+                    Some("timeseries") | Some("timeline") => "📈",
+                    Some("sparkline") => "📊",
+                    Some("table") | Some("top_table") => "⚡",
+                    _ => "file:md",
                 };
                 widgets.push(json!({
                     "kind": "list-row",
@@ -292,13 +271,6 @@ pub fn rail_view(view: &View, machines: &[Machine], report: &FleetRowsReport) ->
             }
         }
     }
-
-    widgets.push(json!({
-        "kind": "button",
-        "id": if view.mode == MODE_TOP { "compose_notebook_btn_top" } else { "compose_notebook_btn" },
-        "label": if view.mode == MODE_TOP { "✏️ Compose Notebook (Top)" } else { "✏️ Compose Notebook (Dash)" },
-        "action": if view.mode == MODE_TOP { "notebook_compose_top" } else { "notebook_compose_dash" },
-    }));
 
     json!({
         "title": if view.mode == MODE_TOP { "Machines & Atlas" } else { "Fleet Cockpit" },
@@ -720,8 +692,8 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                 let top_procs = p["top"].as_array().cloned().unwrap_or_default();
                 if !top_procs.is_empty() {
                     md.push_str("## ⚡ Top Consuming Processes\n\n");
-                    md.push_str("| PID | User | CPU % | RAM RSS | Scope | Command |\n");
-                    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+                    md.push_str("| PID | Signals | User | CPU % | RAM RSS | Scope | Command |\n");
+                    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
 
                     let mut rendered_procs = 0;
                     for proc in top_procs {
@@ -750,8 +722,12 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                             format!("`{comm}`")
                         };
 
+                        let signal_buttons = format!(
+                            "[`🔴 KILL`](action:signal_process:{pid}:9) [`🟡 TERM`](action:signal_process:{pid}:15) [`🔵 INT`](action:signal_process:{pid}:2) [`🔄 HUP`](action:signal_process:{pid}:1)"
+                        );
+
                         md.push_str(&format!(
-                            "| `{pid}` | `{user}` | **`{cpu_pct:.1}%`** | `{}` | {} | {} |\n",
+                            "| `{pid}` | {signal_buttons} | `{user}` | **`{cpu_pct:.1}%`** | `{}` | {} | {} |\n",
                             mb(rss_kb),
                             scope_badge,
                             display_cmd

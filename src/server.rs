@@ -97,6 +97,7 @@ fn sampler(state: Arc<Mutex<PaneState>>) {
         if last_rows.elapsed() >= ROWS_EVERY {
             last_rows = Instant::now();
             let report = rows::scan_all_hosts();
+            crate::harness::evaluate_fleet_state(&report);
             let mut pane = state.lock().unwrap();
             // AXIOM-like ring: one sample per live row per tick, downsampled to 1s
             for r in &report.rows {
@@ -260,6 +261,26 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 let _ = booter::release_rate_limit_hold(None);
                 pane.view.notice = Some("▶ Quota hold released".to_string());
                 pane.touch();
+            } else if let Some(rest) = action.strip_prefix("signal_process:") {
+                if let Some((pid_str, sig_str)) = rest.split_once(':') {
+                    if let (Ok(pid), Ok(sig)) = (pid_str.parse::<i32>(), sig_str.parse::<i32>()) {
+                        let res = unsafe { libc::kill(pid, sig) };
+                        if res == 0 {
+                            let sig_name = match sig {
+                                9 => "SIGKILL (9)",
+                                15 => "SIGTERM (15)",
+                                2 => "SIGINT (2)",
+                                1 => "SIGHUP (1)",
+                                _ => "Signal",
+                            };
+                            pane.view.notice = Some(format!("⚡ Sent {sig_name} to PID {pid}"));
+                        } else {
+                            let err = std::io::Error::last_os_error();
+                            pane.view.notice = Some(format!("⛔ Failed to signal PID {pid}: {err}"));
+                        }
+                        pane.touch();
+                    }
+                }
             } else if let Some(id) = action.strip_prefix("notebook_toggle:") {
                 let nb_id = id.to_string();
                 if let Some(pos) = pane.view.expanded_notebooks.iter().position(|x| x == &nb_id) {

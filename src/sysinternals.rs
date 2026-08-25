@@ -1103,6 +1103,45 @@ fn window_of(ts: &[u128]) -> u128 {
         .min(GRAPH_WINDOW_MS)
 }
 
+fn jankbox_md(report: &FleetRowsReport) -> String {
+    let mut md = String::new();
+    md.push_str("### 🧹 Fleet Jankbox & Process Reaper\n\n");
+    md.push_str(&format!(
+        "| Metric | Count | Action Trigger |\n| :--- | :--- | :--- |\n| **Leaked Child Loops** | `{}` | `clean_jankbox` |\n| **Twin Duplicate Sessions** | `{}` | `clean_jankbox` |\n| **Total Live Seats** | `{}` | `scan_all_hosts` |\n| **Total Context Footprint** | `{:.1} MB` | `harvest` |\n\n",
+        report.leak_count, report.twin_count, report.live_count, report.total_transcript_mb
+    ));
+    if report.leak_count > 0 || report.twin_count > 0 {
+        md.push_str("⚠️ **Action Required**: Run `clean_jankbox` or click **`[ 🧹 Clean Jankbox ]`** on the dashboard.\n");
+    } else {
+        md.push_str("🟢 **Fleet Clean**: Zero leaked subshell loops and zero duplicate twins detected across all nodes.\n");
+    }
+    md
+}
+
+fn watchdog_md() -> String {
+    let mut md = String::new();
+    md.push_str("### 🛡️ Autonomous Watchdog Anomaly Ledger\n\n");
+    let events = crate::harness::get_recent_events();
+    if events.is_empty() {
+        md.push_str("🟢 **Watchdog Invariant Status**: All fleet invariants passing cleanly. No active incidents filed.\n");
+    } else {
+        md.push_str("| Time | Level | Anomaly | Details | Remedy |\n| :--- | :--- | :--- | :--- | :--- |\n");
+        for e in events.iter().rev().take(10) {
+            let badge = match e.level.as_str() {
+                "error" => "🔴 ERROR",
+                "warn" => "🟡 WARN",
+                _ => "🔵 INFO",
+            };
+            let ago_str = ago((now_ms().saturating_sub(e.timestamp_ms)) as f64 / 1000.0);
+            md.push_str(&format!(
+                "| `{ago_str} ago` | {badge} | **{}** | {} | `{}` |\n",
+                e.anomaly, e.details, e.suggested_remedy
+            ));
+        }
+    }
+    md
+}
+
 /// Render the live block a page asked for. An unknown name is reported, never
 /// silently dropped — a page that asks for a reading it does not get should say
 /// so rather than look like a page with nothing to show.
@@ -1116,6 +1155,8 @@ pub fn live_widgets(kind: &str, page_id: &str, report: &FleetRowsReport, blockin
         "cold" => cold_md(report),
         "rolls" => rolls_md(),
         "folds" => folds_md(),
+        "jankbox" => jankbox_md(report),
+        "watchdog" => watchdog_md(),
         // The Legendary Bugs blocks live in their own module: they share this
         // dispatcher rather than a second one, so a page names a reading and
         // does not have to know which file serves it.

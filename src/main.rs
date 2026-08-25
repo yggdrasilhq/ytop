@@ -3,6 +3,7 @@
 mod booter;
 mod complaints;
 mod fleet;
+mod harness;
 mod legendary;
 mod manifest;
 mod notebook;
