@@ -404,9 +404,8 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                         ),
                     }));
                     if nb.mode == "dash" && page.has_ytrace() {
-                        // Inline ytrace preview — latest query summary if available locally
+                        // Inline ytrace preview — multi-modal visual renderer based on page.chart
                         if let Some(q) = page.ytrace_queries.first() {
-                            // For yggterm, ytrace writes to XDG but compat prefers legacy — read both and merge.
                             let homes = {
                                 let mut hs = vec![ytrace::compat::resolve_home(&q.provider)];
                                 if q.provider == "yggterm" {
@@ -424,20 +423,75 @@ pub fn viewport_view(view: &View, machines: &[Machine], report: &FleetRowsReport
                                 }
                                 hs
                             };
-                            let mut sums = Vec::new();
-                            let since = Some(chrono_like_now_ms() - q.since_ms as u128);
-                            for home in &homes {
-                                sums.extend(ytrace::query::summarize(home, Some(&q.category), since));
+                            let since = Some(chrono_like_now_ms().saturating_sub(q.since_ms as u128));
+                            let chart_type = page.chart.as_deref().unwrap_or("table");
+
+                            match chart_type {
+                                "flamegraph" => {
+                                    let mut stacks = Vec::new();
+                                    for home in &homes {
+                                        stacks.extend(ytrace::query::flamegraph_folded(home, since, true));
+                                    }
+                                    stacks.sort_by(|a, b| b.1.cmp(&a.1));
+                                    stacks.truncate(15);
+                                    let max_dur = stacks.first().map(|s| s.1 as f64).unwrap_or(1.0).max(1.0);
+
+                                    let mut md = String::from("## 🔥 Latency Flamegraph (Application Hierarchy)\n\n| Probe Hierarchy | Time Share | Latency |\n| :--- | :--- | :--- |\n");
+                                    for (stack, dur_ns) in &stacks {
+                                        let dur_ms = *dur_ns as f64 / 1_000_000.0;
+                                        let pct = (*dur_ns as f64 / max_dur) * 100.0;
+                                        let bar_len = ((pct / 100.0) * 16.0).round().clamp(0.0, 16.0) as usize;
+                                        let bar = format!("`[{}{}]`", "█".repeat(bar_len), "░".repeat(16usize.saturating_sub(bar_len)));
+                                        let clean_stack = stack.replace(';', " › ");
+                                        md.push_str(&format!("| `{}` | {} | **{:.1} ms** |\n", clean_stack, bar, dur_ms));
+                                    }
+                                    if stacks.is_empty() {
+                                        md.push_str("| — | — | — |\n> *No span records in window.*\n");
+                                    }
+                                    widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
+                                }
+                                "timeline" | "timeseries" => {
+                                    let mut series = Vec::new();
+                                    let bucket_ms = 60_000; // 1 min bucket
+                                    for home in &homes {
+                                        series.extend(ytrace::query::timeseries(home, bucket_ms, since));
+                                    }
+                                    series.sort_by_key(|b| b.bucket_start_ms);
+                                    let mut md = String::from("## 📈 Time-Series Trend & Incident Rollup\n\n| Time (UTC) | Events | Spans | Total ms | p95 ms | Incidents |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+                                    for b in series.iter().rev().take(12) {
+                                        let dt = chrono::DateTime::from_timestamp_millis(b.bucket_start_ms as i64)
+                                            .map(|d| d.format("%H:%M:%S").to_string())
+                                            .unwrap_or_else(|| b.bucket_start_ms.to_string());
+                                        let inc_badge = if b.incident_count > 0 {
+                                            format!("🚨 **{}**", b.incident_count)
+                                        } else {
+                                            "0".to_string()
+                                        };
+                                        md.push_str(&format!("| `{}` | {} | {} | {:.1} ms | {:.1} ms | {} |\n", dt, b.count, b.span_count, b.total_duration_ms, b.p95_ms, inc_badge));
+                                    }
+                                    if series.is_empty() {
+                                        md.push_str("| — | — | — | — | — | — |\n> *No timeseries activity in window.*\n");
+                                    }
+                                    widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
+                                }
+                                _ => {
+                                    // Default: Top Probe Table
+                                    let mut sums = Vec::new();
+                                    for home in &homes {
+                                        sums.extend(ytrace::query::summarize(home, Some(&q.category), since));
+                                    }
+                                    sums.sort_by(|a, b| b.total_ms.partial_cmp(&a.total_ms).unwrap());
+                                    sums.truncate(10);
+                                    let mut md = String::from("## 🔬 Top Probes (Application-Layer Latency & Calls)\n\n| Probe (category/name) | Clock | Count | Total ms | p50 ms | p95 ms | Max ms |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
+                                    for s in &sums {
+                                        md.push_str(&format!("| `{}/{}` | `{}` | {} | **{:.1} ms** | {:.1} ms | {:.1} ms | {:.1} ms |\n", s.category, s.name, s.clock, s.count, s.total_ms, s.p50_ms, s.p95_ms, s.max_ms));
+                                    }
+                                    if sums.is_empty() {
+                                        md.push_str("| — | — | — | — | — | — | — |\n> *No ytrace records yet in window.*\n");
+                                    }
+                                    widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
+                                }
                             }
-                            // merge by (category,name,clock) summing counts like query does per home, but simple: dedupe by probe and sum
-                            sums.sort_by(|a, b| b.total_ms.partial_cmp(&a.total_ms).unwrap());
-                            sums.truncate(6);
-                            let mut md = String::from("## ytrace sample (local) — file-first, not ps\n\n| probe | count | total | p50 | p95 |\n| :--- | :--- | :--- | :--- | :--- |\n");
-                            for s in sums.iter().take(6) {
-                                md.push_str(&format!("| `{}/{}` | {} | {:.1} ms | {:.1} ms | {:.1} ms |\n", s.category, s.name, s.count, s.total_ms, s.p50_ms, s.p95_ms));
-                            }
-                            if sums.is_empty() { md.push_str("| — | — | — | — | — |\n> *No ytrace records yet — run `yggterm` with ytrace or check `YTRACE_HOME`.*\n"); }
-                            widgets.push(json!({ "kind": "markdown", "id": format!("ytrace_preview:{}", page.id), "source": md }));
                         }
                     }
                     // ── The live half of the page ────────────────────────────
