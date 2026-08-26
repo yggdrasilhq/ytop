@@ -93,7 +93,7 @@ fn main() -> Result<()> {
     let control = server::spawn()?;
     {
         let mut pane = control.state.lock().unwrap();
-        pane.view.mode = args.mode.clone();
+        pane.view.select_mode(&args.mode);
     }
 
     let running = Arc::new(AtomicBool::new(true));

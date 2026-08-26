@@ -393,6 +393,7 @@ pub fn read_all(hosts: &[String], timeout: Duration) -> Vec<Value> {
 }
 
 /// One physical machine and the yggterm hosts that live on it.
+#[derive(Clone)]
 pub struct Machine {
     /// The derived identity, or `None` for hosts we could not read.
     pub key: Option<String>,

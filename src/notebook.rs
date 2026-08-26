@@ -5,6 +5,9 @@
 //! Any agent on any host composes extra notebooks via the ytop skill (POST /action).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notebook {
@@ -99,11 +102,40 @@ pub fn notebook_dir() -> std::path::PathBuf {
 /// current probe at render time rather than read from stored markdown — so the
 /// shelf holds one vocabulary while the numbers stay current.
 pub const OVERVIEW_ID: &str = "overview";
+pub const DASH_HOME_ID: &str = "dash-sysinternals";
+pub const TOP_YGGDRASIL_ID: &str = "top-yggdrasil-system";
+pub const TOP_CLINIC_ID: &str = "top-linux-performance-clinic";
+pub const DASH_TRACING_GUIDE_ID: &str = "dash-tracing-field-guide";
+
+/// Stable entry point for each product mode.
+///
+/// Top opens on the live system reading. Dash has no parallel control panel:
+/// its first-class home is the Yggterm SysInternals notebook.
+pub fn home_for_mode(mode: &str) -> (&'static str, String) {
+    if mode == "dash" {
+        (DASH_HOME_ID, "dash-sysint-p1".to_string())
+    } else {
+        (OVERVIEW_ID, overview_page_id("top"))
+    }
+}
 
 /// Whether an id names the Overview notebook, which is built in and never
 /// loaded from disk — a stored notebook must not be able to shadow it.
 pub fn is_overview(id: &str) -> bool {
     id == OVERVIEW_ID
+}
+
+fn is_shipped(id: &str) -> bool {
+    matches!(
+        id,
+        OVERVIEW_ID
+            | DASH_HOME_ID
+            | TOP_YGGDRASIL_ID
+            | TOP_CLINIC_ID
+            | DASH_TRACING_GUIDE_ID
+            | "top-legendary-bugs"
+            | "dash-legendary-bugs"
+    )
 }
 
 /// The Overview page id for a mode.
@@ -114,10 +146,10 @@ pub fn overview_page_id(mode: &str) -> String {
 fn overview_notebook(mode: &str) -> Notebook {
     let (title, description, page_title, body) = if mode == "top" {
         (
-            "Overview",
-            "The machines, live — host metrics, storage, containers and processes.",
-            "Host Overview",
-            "# Host Overview\n\n             A LIVE page: composed from the current probe each refresh, not stored.\n\n             Shows the selected machine's CPU, memory and swap gauges, its storage              pools and containers where it has them, and its heaviest processes.\n\n             Pick a machine in the rail to point this page at it. Every machine              yggterm has ever reported is registered and stays on that list, so one              that has gone quiet reads as unreachable rather than vanishing.",
+            "System Top",
+            "A live, sampled reading of the selected system — pressure, storage, containers and processes.",
+            "System Top",
+            "# System Top\n\nA live reading composed from the current probe. It answers the questions people open `top` for: what is busy, what is full, what changed, and which process needs attention.\n\nChoose any host connected to the launching Yggterm from the host switcher in the notebook bar. Unreachable systems stay visible and say that they could not be read; they never disappear as if they were healthy.",
         )
     } else {
         (
@@ -147,11 +179,272 @@ fn overview_notebook(mode: &str) -> Notebook {
     }
 }
 
+fn top_paper_page(id: &str, title: &str, markdown: &str) -> Page {
+    Page {
+        id: id.to_string(),
+        title: title.to_string(),
+        markdown: markdown.to_string(),
+        ytrace_queries: Vec::new(),
+        chart: None,
+        live: None,
+        composed: false,
+    }
+}
+
+fn linux_performance_clinic() -> Notebook {
+    Notebook {
+        id: TOP_CLINIC_ID.to_string(),
+        title: "Linux Performance Clinic".to_string(),
+        mode: "top".to_string(),
+        description: "A calm escalation path from a hot process to CPU, memory, storage, and network evidence—without ytrace.".to_string(),
+        author: "ytop".to_string(),
+        created_at_ms: 0,
+        pages: vec![
+            top_paper_page(
+                "top-clinic-p1",
+                "1. First five minutes",
+                r#"# The first five minutes
+
+Use this book when “the machine is slow” is the entire report. The decision is not *which command can I run?* It is *which resource is making useful work wait?*
+
+## Answer these three questions first
+
+1. Is pressure sustained in the five-minute plot, or was it one short burst?
+2. Does one process own the interval CPU, or are many tasks competing?
+3. Is memory, storage, or runnable work rising at the same time?
+
+In **System Top**, select the affected host, read the pressure history, then inspect the process rows before touching anything. A high lifetime `%CPU` from `ps` is biography; Ytop's 400 ms delta is the current interval.
+
+## Safe first actions
+
+- If one expendable process is clearly unruly, choose **Kill… → TERM**. Give it time to clean up.
+- Use **INT** for an interactive job that should behave as if you pressed Ctrl-C.
+- Use **KILL** only when graceful termination failed and you accept lost in-memory state.
+
+> Never signal from a row click. The chooser is the safety boundary.
+
+**Reproduce:** `uptime; cat /proc/loadavg; ps -eo pid,stat,comm --sort=-pcpu | head`—but compare conclusions against Ytop's interval sample."#,
+            ),
+            top_paper_page(
+                "top-clinic-p2",
+                "2. CPU: busy or waiting",
+                r#"# CPU: busy, runnable, or blocked
+
+The operational question is: **are cores doing useful work, or are tasks queued behind something else?** CPU percent alone cannot answer it.
+
+| Evidence | Read it as | Next move |
+| :--- | :--- | :--- |
+| one process owns a core | compute hotspot | inspect its threads; profile before changing priority |
+| load rises but CPU stays moderate | runnable or uninterruptible queue | inspect process state and I/O |
+| system time rises | kernel, network, or storage work | graduate to the Yggdrasil kernel page |
+| short repeated spikes | scheduled work or churn | correlate timestamps before blaming a daemon |
+
+`R` means runnable; `D` means uninterruptible sleep, commonly storage. A pile of `D` tasks is not spare CPU—it is work the CPU cannot advance.
+
+**Reproduce:** `vmstat 1 10` and `ps -eLo pid,tid,psr,stat,comm --sort=-pcpu`. Record the window and core count with the result.
+
+**Graduate when:** you can name a hot thread but not the function burning it. Open the tracing field guide in Dash for application spans, or the Yggdrasil System book for kernel scheduling."#,
+            ),
+            top_paper_page(
+                "top-clinic-p3",
+                "3. Memory: pressure, not fullness",
+                r#"# Memory: pressure, not fullness
+
+Linux uses free memory for cache, so **“RAM is full” is not a diagnosis**. The decision is whether allocations are forcing reclaim, swap, or termination.
+
+Start with `MemAvailable`, not `MemFree`. Then ask:
+
+- Is swap-in or swap-out moving now?
+- Is one process's RSS climbing over several samples?
+- Did the kernel record an OOM kill?
+- Is a container limit tighter than the host's apparent headroom?
+
+Cache that can be reclaimed is useful, not leaked. RSS that grows and never returns may be a leak, but a single snapshot cannot establish growth.
+
+**Safe action:** capture the process, cgroup, and time window before restarting it. A restart may restore service and erase the evidence; write down both outcomes.
+
+**Reproduce:** `grep -E 'MemAvailable|SwapFree|SwapTotal' /proc/meminfo; vmstat 1 10; journalctl -k -g 'oom|Out of memory' --since -1h`. Absence from an unreadable journal is unavailable, not zero."#,
+            ),
+            top_paper_page(
+                "top-clinic-p4",
+                "4. Storage: latency owns throughput",
+                r#"# Storage: latency owns throughput
+
+The operational question is: **is the workload slow because storage is saturated, unhealthy, or simply waiting on one high-latency operation?** Throughput is secondary.
+
+For ZFS, separate four facts:
+
+1. pool health—data safety;
+2. capacity—how close allocation is to operational limits;
+3. fragmentation—one contributor to allocation cost, not a verdict by itself;
+4. live I/O—what the pool is doing in this interval.
+
+A flat high throughput plot may be healthy sequential work. Low throughput with a long queue can be much worse. Never infer latency from bytes per second.
+
+**Reproduce:** `zpool status; zpool iostat -v 1 10; iostat -xz 1 10`. Keep device names, interval, units, and pool health beside the numbers.
+
+**Graduate when:** block latency is established but ownership is not. The Yggdrasil System workbench names the missing block/ZFS probe instead of manufacturing a cause."#,
+            ),
+            top_paper_page(
+                "top-clinic-p5",
+                "5. Network: loss before bandwidth",
+                r#"# Network: loss and latency before bandwidth
+
+The operational question is: **did the request wait on the network, retransmit, or never leave this host?** A bandwidth graph cannot distinguish them.
+
+Read the path in order: interface state → errors and drops → socket queues → retransmits → remote latency. A healthy local interface does not prove a healthy route.
+
+| Symptom | Evidence to collect | Avoid concluding |
+| :--- | :--- | :--- |
+| request tail grows | RTT distribution and retransmits | “the server is slow” from one client timeout |
+| send queue grows | per-socket queue and receiver state | “bandwidth exhausted” without link utilization |
+| drops rise | interface or cgroup and timestamp | “packet loss is remote” from aggregate counters |
+
+**Reproduce:** `ip -s link; ss -s; nstat -az | grep -E 'Retrans|Timeout'; ping -c 20 <target>`. State the target and window. For an HTTP path, graduate to a Ychrome or service notebook that can join browser, server, and kernel evidence."#,
+            ),
+            top_paper_page(
+                "top-clinic-p6",
+                "6. Write the handoff",
+                r#"# Write a handoff another operator can falsify
+
+A professional finding is short because its evidence is complete:
+
+> During **14:20–14:25 IST**, host **dev** held **92–97% per-core CPU**. PID **4242** owned **81–86%** of the interval sample. RAM and storage throughput stayed flat. `SIGTERM` at **14:26** returned CPU below **20%** within one refresh. Source: `/proc/stat` and `/proc/<pid>/stat`, 2 s cadence. Reproduce with `ytop --json`.
+
+That sentence names the question, subject, window, source, units, action, outcome, and reproduction path. It does not claim the process's internal cause. The next notebook can now test that cause without rediscovering the incident.
+
+## Graduation rule
+
+- Top tells you **who owns a resource**.
+- Dash and ytrace tell you **which application path owned time**.
+- Kernel tracing tells you **where the operating system made it wait**.
+
+Stop at the first layer that supports the decision. More instrumentation is not automatically more truth."#,
+            ),
+        ],
+    }
+}
+
+fn dash_trace_page(id: &str, title: &str, markdown: &str, category: &str, name: &str) -> Page {
+    Page {
+        id: id.to_string(),
+        title: title.to_string(),
+        markdown: markdown.to_string(),
+        ytrace_queries: vec![YtraceQuery {
+            provider: "yggterm".to_string(),
+            category: category.to_string(),
+            name: name.to_string(),
+            since_ms: 3_600_000,
+        }],
+        chart: Some("emd-plot".to_string()),
+        live: Some("graphs".to_string()),
+        composed: false,
+    }
+}
+
+fn tracing_field_guide() -> Notebook {
+    Notebook {
+        id: DASH_TRACING_GUIDE_ID.to_string(),
+        title: "Tracing Field Guide".to_string(),
+        mode: "dash".to_string(),
+        description: "A beginner-to-operator path through windows, spans, percentiles, correlation, and probe gaps.".to_string(),
+        author: "ytop".to_string(),
+        created_at_ms: 0,
+        pages: vec![
+            dash_trace_page(
+                "dash-guide-p1",
+                "1. Ask one timed question",
+                r#"# Ask one timed question
+
+Tracing starts with a question that contains a clock: **what made the UI unresponsive during the last five minutes?** “Show me all traces” has no stopping condition and produces a wall of evidence nobody can judge.
+
+The live component below reads `ui/block`. Count says how often the condition occurred; p50 describes the ordinary event; p95 describes the tail a person is more likely to feel. A quiet window means the named probe emitted no record. It does not prove the UI was healthy if the probe was unavailable.
+
+**Decision:** if p95 is high and count is rising, narrow the same window by operation. If the window is silent, verify the probe map before closing the incident.
+
+**Reproduce:** `ytrace query --app yggterm --category ui --since 1h --json`. Keep provider, category, window, and clock with any number you quote."#,
+                "ui",
+                "block",
+            ),
+            dash_trace_page(
+                "dash-guide-p2",
+                "2. Read distributions",
+                r#"# Read a distribution, not one dramatic event
+
+An average can stay calm while a small tail makes the product unusable. Compare p50 and p95 before opening an individual span.
+
+- p50 and p95 rise together: the common path became slower.
+- p50 stays flat while p95 rises: a conditional path or contention affects a minority.
+- count changes sharply: workload changed; latency alone is not comparable yet.
+
+The plot and table below share the same source and window. Hover points for exact values; use the table when precision matters.
+
+**Decision:** choose the percentile that matches the user-visible complaint, then keep that percentile fixed through the investigation.
+
+**Reproduce:** `ytrace query --app yggterm --category daemon_request --since 1h --json`. Never pool CPU-time and wall-time measurements into one distribution."#,
+                "daemon_request",
+                "snapshot",
+            ),
+            dash_trace_page(
+                "dash-guide-p3",
+                "3. Correlate without inventing causality",
+                r#"# Correlate without inventing causality
+
+Two spikes in the same minute are candidates, not cause and effect. Narrow both to the same monotonic window and look for a join key: request id, row id, frame id, PID, tab, or trace id.
+
+If series overlap without a join key, write **coincident**. If a shared id shows render work inside the block interval, write **correlated**. Reserve **caused** for an intervention or a mechanism the trace establishes.
+
+**Decision:** either obtain the join key, design the smallest probe that adds it, or stop at coincidence. Professional observability includes the boundary of what the data can say.
+
+**Reproduce:** export both categories over the identical epoch range and retain their raw timestamps."#,
+                "render",
+                "gui",
+            ),
+            dash_trace_page(
+                "dash-guide-p4",
+                "4. Missing is a state",
+                r#"# Missing is a state
+
+Every live reading belongs to one of six states: **observed, collecting, silent, unavailable, stale, or uninstrumented**. Only observed data can support a numeric claim.
+
+`silent` means a working probe emitted nothing in the chosen window. `unavailable` means the source could not be read. `uninstrumented` means no probe could have emitted the answer. Rendering all three as zero is how dashboards become confident fiction.
+
+**Decision:** when a component is not observed, resolve its state before interpreting its shape. Widen a legitimate silent window; repair unavailable transport; design an uninstrumented probe.
+
+**Reproduce:** inspect the component evidence footer first. It declares source, freshness, window, units, and the command used to rebuild the reading."#,
+                "terminal_mount",
+                "begin",
+            ),
+            dash_trace_page(
+                "dash-guide-p5",
+                "5. Close the loop",
+                r#"# Close the loop with an intervention
+
+A trace investigation ends with a changed outcome, not a plausible story.
+
+1. Freeze the incident window and raw evidence.
+2. State one mechanism the evidence supports.
+3. Change one variable: disable the path, bound the work, or add the missing join key.
+4. Repeat the same query and compare the same percentile under comparable load.
+5. Record what remained unexplained.
+
+An intervention that restores latency establishes practical ownership even when every internal detail is unknown. A refactor followed by a prettier chart does not.
+
+**Handoff form:** question; window; source; state; units; finding; safe action; result; reproduction; residual uncertainty. Both a person and an agent should be able to continue from those fields without reading pixels."#,
+                "heartbeat",
+                "panic",
+            ),
+        ],
+    }
+}
+
 fn base_notebooks() -> Vec<Notebook> {
-    vec![
+    let notebooks = vec![
         // ⭐ Overview first, in both modes: it is what ytop opens on.
         overview_notebook("top"),
         overview_notebook("dash"),
+        linux_performance_clinic(),
+        tracing_field_guide(),
         // Top — no ytrace (host atlas)
         Notebook {
             id: "top-atlas-client".to_string(),
@@ -430,8 +723,8 @@ fn base_notebooks() -> Vec<Notebook> {
         },
         // Dash — exclusively ytrace: the supervision system itself, explained then shown live.
         Notebook {
-            id: "dash-sysinternals".to_string(),
-            title: "yggterm SysInternals".to_string(),
+            id: DASH_HOME_ID.to_string(),
+            title: "Yggterm SysInternals".to_string(),
             mode: "dash".to_string(),
             description: "The supervision system as a book: the two arming planes, the seat census, when each watcher last fired, the ytrace graphs — and four dream-mode walkthroughs of what the machinery is FOR, each with the live numbers beside it.".to_string(),
             author: "ytop".to_string(),
@@ -439,7 +732,7 @@ fn base_notebooks() -> Vec<Notebook> {
             pages: vec![
                 Page {
                     id: "dash-sysint-p1".to_string(),
-                    title: "1. The armings — two planes, and a row can be on one".to_string(),
+                    title: "1. Supervision map".to_string(),
                     markdown: "# Two planes, and a row can be on exactly one\n\nThere are two watchdogs over this fleet, and they are **separate stores** rather than two views of\none. A row can be on either, both, or neither, and the four cases behave completely differently\nwhen something goes wrong.\n\n**The booter is a dumb timer, and that is its virtue.** A session SUBSCRIBES to it, and a detached\nwatcher — one that outlives the session — types `continue` when it goes quiet. It has to be\noutside: **a stalled session cannot boot itself**, because the stall *is* the turn ending early, so\nanything scheduled inside the turn is dead in exactly the case that matters.\n\n**The monitor is the judgement.** A timer can ask \"has this been quiet too long\"; it cannot ask\n*why*, and the why decides the action:\n\n* mid-turn and **thinking** — leave it alone\n* mid-turn and **abandoned** — wake it, and from the outside it looks identical to thinking\n* **out of context** — it cannot be woken at all; it has to be relayed to a successor\n* **taken back by a person** — nothing may touch it\n\nThe discriminator between the first two is CPU. A thinking agent burns some; an abandoned one does\nnot. Without that, both collapse into \"do not touch\" — and the abandoned case is precisely the one\nthat needs touching.\n\n## The failure this page exists for\n\nSubscribing to one plane is not subscribing to the other, and one chip cannot say which:\n\n| state | what actually happens when it stalls |\n| :--- | :--- |\n| **both** | it is woken; if the wake does not take, somebody hears about it |\n| **booter only** | it is woken — and if the wake does not take, **the escalation rings into an empty room** |\n| **monitor only** | somebody would hear — but nothing wakes it first, so nothing ever escalates |\n| **neither** | it sits |\n\nBooter-only is the common one, because subscribing is one verb and attaching is another, and a lane\nin a hurry does the first and forgets the second. It is invisible from any pane that renders\nsupervision as a single word.\n\n## Reading the block below\n\n`gone ×N` is **not** a gap — the booter is counting a retired row down and will drop it by itself,\nbecause a corpse must not be booted forever. `lapsed` has already expired on its own. A row on\n**never-arm** is not unsupervised either: that file asserts *a human types at this address*, and the\nbooter's only remedy is to type, so arming one would type into a person.\n\n⛔ **Do not bulk-arm what this page shows.** No probe separates \"nobody ever attached it\" from \"it\nstood itself down deliberately\", and guessing wrong types into somebody. Decide per row.\n\n## Why `ui/block` is the trace on this page\n\nSupervision is not free. Every classification a watchdog makes probes a row, and a probe crosses the\nUI thread of the machine a person is typing on. A rising `ui/block` density with no user-facing\ncause is worth reading against how many rows are armed — the cost of watching is paid in the\nkeyboard latency of whoever is watching.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -455,7 +748,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p2".to_string(),
-                    title: "2. The rows — the seat census".to_string(),
+                    title: "2. Fleet census".to_string(),
                     markdown: "# The seat census — a seat is an address, not a process\n\nA row is a **seat** in the sidebar; the agent process is a **tenant** of it. The two come apart\nconstantly, and most fleet mistakes live in that gap:\n\n* a seat with **no process** is cold — often perfectly correct, because a lane that finished its\n  work stands down and waits to be folded\n* a **process with no seat** is an orphan, still burning CPU somewhere nobody will ever read\n* **two processes on one seat** is a twin, usually a resume that landed twice; it doubles the cost\n  of the same conversation and neither half knows about the other\n* a **child loop** left behind by a test harness spins forever at the machine's expense\n\n## Context size is not a curiosity, it is the price of the next turn\n\nResuming a cold seat means re-reading its entire context before it can produce a sentence. Past\nroughly 10 MB that read costs more than the work it enables, which is why the right verb for a heavy\ncold seat is *harvest*, not *continue* — page 6.\n\n## What the columns mean\n\n`LIVE ×N` counts **processes, not health** — `×2` is a twin, not twice the work. `cpu` is a sampled\ndelta rather than a `ps` lifetime average, so a seat that burned a core an hour ago and has slept\nsince reads calm here and busy in `ps`; the delta is the live view and `ps` is a biography.\n`last moved` is the transcript's mtime, which a working row touches every few seconds.\n\n`supervision` is the **collapsed, single-plane chip** that the fleet pane shows. Page 1 is the honest\nversion of that same column — the two are on the same shelf deliberately, so the difference between\n\"⚡ Armed\" and *armed on which plane* is one page turn away.\n\n## Why `sidebar/merge_rows` is the trace on this page\n\nIt is what drawing this census costs. It runs on every snapshot, so its p95 is an early warning: a\nmerge that has drifted from single-digit milliseconds into tens means the row plane itself has become\nthe jank, and the seat count is the first thing to look at.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -471,7 +764,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p3".to_string(),
-                    title: "3. When each last fired — and silence has no symptom".to_string(),
+                    title: "3. Monitor & booter health".to_string(),
                     markdown: "# When each last fired\n\nEvery watcher here fails the same way: **it stops, and stopping looks exactly like a calm fleet.**\nNo error, no alert, no missing pane — just nothing, which is also what a healthy quiet hour produces.\nThe only instrument that separates them is a clock, which is why this page is a table of timestamps\nrather than a table of statuses.\n\n## The four cadences\n\n| watcher | the question it asks | cadence |\n| :--- | :--- | :--- |\n| **booter** | has this row been quiet too long | a pass every few minutes, per subscriber |\n| **monitor** | *why* is it quiet, and who should hear | the same order, plus a deliberately long escalation window |\n| **roll watcher** | has `main` moved past the daemon that is running | hourly |\n| **fold sweep** | which rows are finished, stalled or dead | rides the roll watcher's tick |\n\nThe monitor's escalation window is long **on purpose**. A finished relay row idles by design;\nescalating it after four minutes produced three false alarms inside one minute, so the window is\nfifteen. A watchdog that cries at every rest is uninstalled within a day, which is a worse outcome\nthan a slow one.\n\n## ⛔ Alive is not audible\n\nThe booter reports **two** instants: when its loop last ticked, and when it last managed to write to\nits log. A process ticking into a file nobody can read supervises nobody, and from outside it is\nindistinguishable from a healthy one — same process, same CPU, same uptime. The pair is the only\nthing that catches it.\n\n**The other three have no heartbeat file.** Their row below is the mtime of a log, which says the log\nmoved — not that the loop is well. That is weaker evidence and it is labelled as such rather than\nrounded up to a green tick.\n\n## Why `heartbeat/panic` is the trace on this page\n\nIt is the daemon's own host-health complaint: sustained memory, sustained cores, UI-block density,\nruntime tmpfs growth. It belongs here because **a watcher that has stopped and a host that has fallen\nover produce the same silence**, and this is the series that tells the two apart.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -487,7 +780,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p4".to_string(),
-                    title: "4. The graphs — what the fleet costs, over time".to_string(),
+                    title: "4. Resource history".to_string(),
                     markdown: "# The graphs\n\nDash is exclusively ytrace, so every series here is a file-first read of `ytrace.jsonl`. Nothing is\nsampled from `ps` and nothing is asked of the daemon — the trace survives the daemon being down,\nwhich is exactly the moment a person most wants to know what happened.\n\n## What to look at, and in what order\n\n1. **`ui/block` over time.** A block is the UI thread stalling long enough to be felt. **Density\n   matters more than any single spike** — a rising tail precedes a freeze. Blocks caused by an agent\n   probing rows are indistinguishable from blocks caused by the app itself, so read the shape against\n   page 1's arming count before blaming the app.\n2. **`daemon_request` latency.** The request path everything else rides on. `snapshot` is polled\n   continuously, so its p95 is the fleet's floor: when it moves, everything moves.\n3. **`render` cost.** Split by clock. `cpu` rows are CPU time, `wall` rows are elapsed — a render\n   that *waited* is cheap on one and expensive on the other, and mixing them is how a busy GUI gets\n   called idle.\n4. **`heartbeat/panic`.** Host level, not app level. When this is firing, everything above it is a\n   symptom rather than a cause.\n\n## How to read a sparkline honestly\n\nEach is normalised against **its own** peak, and the peak is printed beside it. Two lines of equal\nheight are not equal magnitudes. An empty bucket draws as the floor and means *nothing happened* —\nnever *it got faster* — so read the sample count before the shape.\n\n## ⛔ What is missing here, and it is a real gap rather than a design\n\n**The two watchdogs emit no ytrace at all.** Their wakes, their escalations and their rate-limit\nholds exist only as lines in a log, which is why page 5 is parsed prose instead of a series. Until\nthey emit spans, a wake cannot be correlated against the `ui/block` it caused — and that correlation\nis the entire reason for putting supervision and profiling on one Dash.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -515,7 +808,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p5".to_string(),
-                    title: "5. Dream — a lane stalls, and something outside it wakes it".to_string(),
+                    title: "5. Wake & escalation log".to_string(),
                     markdown: "# Dream 1 — a lane stalls, and something outside it types `continue`\n\n**The story.** A lane on seat `4.3` is halfway through a build. Its turn ends early — no error, no\ncrash, the model simply stopped. Nothing inside the session can help, because everything inside the\nsession ended when the turn did. The detached watcher notices the transcript has not moved for longer\nthan its window, classifies the row, and writes one `continue` **to the PTY, not to the composer** —\nthe composer belongs to whoever is typing, and a write there races the agent's own input. Sessions\nhave refused a composer submit for thirty seconds each and taken a PTY write instantly.\n\nIf the wake takes, the lane resumes and nobody was ever involved. If it does not, the second plane\nearns its keep: the monitor escalates to the campaign's orchestrator, which can probe, read and\ndecide — or to a person when there is no orchestrator to carry it.\n\n**What makes it work:** the watcher is outside the thing it watches.\n**What makes it fail:** the lane was armed on the booter and attached to nothing, so the escalation\nhad nowhere to go — page 1.\n\n## The verdicts, and why each has its own remedy\n\n| verdict | remedy |\n| :--- | :--- |\n| `WORKING` | nothing |\n| `IDLE` | wake once; escalate if it stays idle past the window |\n| `STUCK` | mid-turn and **not** burning CPU — abandoned, so wake it |\n| `RATE_LIMITED` | ⛔ **do not wake.** The account cannot spend; the session is fine. A boot here burns a refused turn and teaches nothing. One sighting holds the **whole fleet**, because a rate limit is account-wide while detection can only ever be per-row. |\n| `NO_TRANSCRIPT` | ⛔ not \"idle\" — nothing could be read, and \"I could not look\" is not a measurement |\n| `SKIP:draft-race` | the row had unsent text; typing would have raced a person mid-sentence |\n\n**An escalation is a fact, not a failure.** A row that escalated is one a person or an orchestrator\nnow owns, and the booter deliberately stops booting it — two watchdogs and a human all typing into\none row is worse than none of them.\n\n## Why `ui/block` is the trace on this page\n\nA wake is a write into a live terminal on the machine somebody is using. The blocks around a burst of\nwakes are the cost of the safety net, and they are the honest argument for why the watchers should\nnot be armed over rows nobody is supervising.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -531,7 +824,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p6".to_string(),
-                    title: "6. Dream — a lane goes cold, and is harvested rather than prompted".to_string(),
+                    title: "6. Cold-seat triage".to_string(),
                     markdown: "# Dream 2 — a lane goes cold, and is harvested rather than prompted\n\n**The story.** Seat `4.7` has been quiet for hours. Its process is gone. Its transcript is 34 MB. The\ntempting move is to resume it and ask what it was doing.\n\n⛔ **That question is the most expensive thing on this page.** Resuming a cold seat re-reads its\nentire context before it can produce a single sentence, and what comes back is a self-report that\ncannot be verified anyway. **The asking IS the expense** — what you are buying is the wake, not the\nanswer.\n\n**The cheaper path, in order, and it is cheapest-first on purpose:**\n\n1. **mtime** — how cold is it actually\n2. **size** — what would a wake cost\n3. **what it was TOLD** — the instructions in the transcript are the highest signal per byte in the\n   file\n4. **its last prose turn** — a working lane's own status report, already written down\n5. **what it DID** — the files it wrote, the commits it made\n\nA transcript says what a session *believed*; a commit says what it *did*. **The artefact wins.** Two\nlanes have been told apart, their roles established and one safely retired, from six extracted lines\nout of megabytes of transcript.\n\nThen the seat is folded (page 8) and a successor is claimed with a brief distilled from those\nartefacts — so the successor needs no history at all, which is the whole point of harvesting rather\nthan resuming.\n\n## ⛔ And swallowing it whole is the other failure\n\nReading the entire transcript instead of asking it moves the same cost into *your* context and\ncarries it for the rest of the session, when the signal you wanted was in the last one per cent.\nBoth mistakes look like diligence. **Extract, do not ingest.**\n\n## The chips\n\n`⚠️` above 10 MB, `🚨` above 30 MB. They are not health warnings about the lane — the lane may have\ndone excellent work. They are the price of the decision you are about to make about it.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -547,7 +840,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p7".to_string(),
-                    title: "7. Dream — a roll lands, and the client restarts under it".to_string(),
+                    title: "7. Rollout ledger".to_string(),
                     markdown: "# Dream 3 — a roll lands, and the client is restarted under it\n\n**The story.** `main` moves ahead of the daemon that is actually running. Nobody notices, because\n**a stale daemon works perfectly** — it simply works like last week. Rows keep being served by a\nbinary whose bugs are fixed upstream and whose fixes are not present, and every report filed against\nit is a report about a version nobody is developing any more.\n\nThe roll watcher compares the two hashes on its own cadence, builds, deploys to every host, and\nrecords what landed. The restart is the part that needs care, because it lands on the machine a\nperson is typing at — so it is a scheduled event with a ledger, not a surprise.\n\n## Why a ledger, rather than \"just check the version\"\n\nA version string says what a binary *claims*. The ledger says **when, which lane, which hosts, which\nbuild, which version** — so a bug report can be pinned to the build that was live when it was filed.\nWith several hosts each holding several checkouts, an unpushed commit is not \"not yet shared\", it is\na **divergence somebody reconciles by hand later**, usually without knowing which side is newer.\n\n⛔ **A roll must never type into a row a human attends.** The never-arm list is consulted before\nanything is restarted, and a graceful handover types nothing at all — it lets the sessions land on\nthe new binary at their own next turn.\n\n## Why `daemon_request/hot_restart` is the trace on this page\n\nIt is the restart itself, timed. It is measured in **seconds, not milliseconds**, and that number is\nthe fleet's whole tolerance for rolling: while it is small the roll is invisible, and when it grows\nthe roll stops being maintenance and becomes an interruption somebody will start avoiding.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -563,7 +856,7 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
                 Page {
                     id: "dash-sysint-p8".to_string(),
-                    title: "8. Dream — a row is folded, and its worktree with it".to_string(),
+                    title: "8. Retirement & cleanup".to_string(),
                     markdown: "# Dream 4 — a row is folded, and its worktree with it\n\n**The story.** A lane finishes, announces that it is done, and stands down with nobody coming after\nit. Its seat stays in the sidebar. Its process stays resident. The booter goes on arming a corpse.\nNothing anywhere says so — and within an hour the sidebar has refilled with quiet corpses that all\nlook like working lanes.\n\n**Retiring a row is four planes, not one:**\n\n1. the **row** is delisted\n2. the **monitor**'s subscribers are moved off it\n3. the **booter** is disarmed for it\n4. the **agent process** is reaped\n\nThe fourth is not defensive programming. `session remove` reports the **request**, not the effect,\nand routinely delists a row whose agent keeps running — so a fold that skips step four produces\nexactly the orphan it was meant to prevent.\n\nAll four steps existed for a long time in exactly one place: as a side effect of a *successor*\nclaiming a seat. So the fleet had a `replace` and no `fold`, and a lane that finished with nobody\ncoming after it had no path to being retired at all.\n\n## ⛔ A stall is not a fold\n\nA lane that has merely paused, with work still assigned, needs **one `continue`** — folding it throws\naway a lane that was fine. So STALLED is its own verdict with its own remedy, and it is acted on once\nper stall rather than once per sweep.\n\nAnd **a lane that simply stops, announcing nothing, is the common case.** An early version of this\nsweep required an announcement before it would call anything finished, and therefore classified every\nsilent corpse as WORKING forever.\n\n## The worktree half of the same sweep\n\nA folded lane usually leaves a git worktree behind. It is removed only when it is genuinely spent:\n⛔ **unpushed commits, or a live process standing in it, means KEEP** — whatever the row's state.\n**A fold may never be the thing that loses work.**\n\n## Dry by default\n\nFolding kills somebody's agent. It may never be the accidental outcome of a mistyped flag, so the\nsweep classifies and changes nothing until it is told a second time.".to_string(),
                     ytrace_queries: vec![
                         YtraceQuery {
@@ -575,6 +868,62 @@ fn base_notebooks() -> Vec<Notebook> {
                     ],
                     chart: Some("table".to_string()),
                     live: Some("folds".to_string()),
+                    composed: false,
+                },
+            ],
+        },
+        // Top — a host-level, Yggdrasil-aware systems notebook.
+        Notebook {
+            id: TOP_YGGDRASIL_ID.to_string(),
+            title: "Yggdrasil System".to_string(),
+            mode: "top".to_string(),
+            description: "The host and every LXC beneath it, from pressure and storage to the kernel probes still missing.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: 0,
+            pages: vec![
+                Page {
+                    id: "top-yggdrasil-p1".to_string(),
+                    title: "1. System map".to_string(),
+                    markdown: "# Yggdrasil System\n\nThis notebook treats the hypervisor and its LXCs as one system. Start with the live pressure map below: host load, memory, pool I/O, containers, and the processes that own the work.\n\n## Questions this page answers\n\n- Is pressure on the host or inside one container?\n- Is a slow workload compute-bound, memory-bound, or waiting on storage?\n- Which process should be followed into a trace?\n\nThe numbers are a 400 ms `/proc` sample. They describe the present interval, not a process lifetime average.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("kernel_half".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "top-yggdrasil-p2".to_string(),
+                    title: "2. Kernel tracing workbench".to_string(),
+                    markdown: "# Kernel tracing workbench\n\nUse this page when a process table can name pressure but cannot explain it. The intended ladder is `sched_switch` for scheduling, fork/exec for process churn, block and ZFS delay for storage, and `io_uring` submit/complete for asynchronous I/O.\n\nA tool being installed is not a measurement. Until Ytop attaches and records these probes, the live block says so explicitly; it never renders missing instrumentation as a healthy zero.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("ebpf_gap".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "top-yggdrasil-p3".to_string(),
+                    title: "3. Container ownership".to_string(),
+                    markdown: "# Container ownership\n\nThe decision on this page is **whether pressure belongs to the host, one LXC, or a process inside it**. A container boundary is an accounting boundary, not a cause.\n\nStart with the host interval, then compare container CPU, RSS, task count, and its busiest internal process over the same refresh. A process visible from both the host and guest is one process, not two samples to add.\n\n## Safe action ladder\n\n1. identify the exact host PID and container;\n2. inspect its command and owner;\n3. use the System Top signal chooser for a process-level intervention;\n4. stop an entire container only when the service boundary, not one child, is the intended target.\n\n**Reproduce:** `lxc list; lxc info <name>; lxc exec <name> -- ps -eo pid,stat,comm`. Record whether the PID namespace translated the id.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("kernel_half".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "top-yggdrasil-p4".to_string(),
+                    title: "4. Storage path".to_string(),
+                    markdown: "# Storage path\n\nThe decision is **which layer owns a slow I/O**: process, guest filesystem, host block layer, or ZFS pool. Capacity and throughput are context; latency is the symptom.\n\nFollow one operation downward: guest process → guest mount → host dataset or volume → pool → device. Keep device, dataset, container, PID, and window together so the handoff remains joinable.\n\nA healthy pool status proves data safety, not low latency. A quiet throughput sample can coexist with one request waiting seconds.\n\n**Reproduce:** `zfs list; zpool status; zpool iostat -v 1 10; iostat -xz 1 10`. If block latency exists but the owning request is unknown, the missing probe is a finding—not permission to guess.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("kernel_half".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "top-yggdrasil-p5".to_string(),
+                    title: "5. Flamegraph field guide".to_string(),
+                    markdown: "# Flamegraph field guide\n\nA flamegraph answers **where sampled time accumulated during a declared window**. Width is frequency, not chronology. A wide frame is a candidate for optimization only after the workload and clock are named.\n\nUse CPU samples for computation, off-CPU samples for waiting, and allocation profiles for memory churn. Never compare widths from different sample counts as if they share a scale.\n\n## Capture contract\n\n- subject: host, container, cgroup, or PID;\n- clock: on-CPU, wall, off-CPU, or allocation;\n- window and sampling frequency;\n- symbolization state;\n- exact command and output artifact.\n\n**Safe action:** capture before restarting the process, then repeat under comparable load after the change. Until Ytop attaches the kernel probe, the live block below remains explicitly uninstrumented.".to_string(),
+                    ytrace_queries: vec![],
+                    chart: None,
+                    live: Some("ebpf_gap".to_string()),
                     composed: false,
                 },
             ],
@@ -738,7 +1087,26 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
-    ]
+    ];
+
+    // The shipped shelf is deliberately small. The longer historical books
+    // remain in source as migration material, but a first-run rail is a table
+    // of contents, not an archive dump. Agent-composed books are added below.
+    notebooks
+        .into_iter()
+        .filter(|notebook| {
+            matches!(
+                notebook.id.as_str(),
+                OVERVIEW_ID
+                    | DASH_HOME_ID
+                    | TOP_YGGDRASIL_ID
+                    | TOP_CLINIC_ID
+                    | DASH_TRACING_GUIDE_ID
+                    | "top-legendary-bugs"
+                    | "dash-legendary-bugs"
+            )
+        })
+        .collect()
 }
 
 pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
@@ -758,7 +1126,7 @@ pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
                 if let Ok(nb) = serde_json::from_str::<Notebook>(&data) {
                     // ⛔ Overview is built in. A stored notebook claiming its id
                     // would replace the one view that must always be reachable.
-                    if is_overview(&nb.id) {
+                    if is_shipped(&nb.id) {
                         continue;
                     }
                     // Top/Dash segregation: Top wants no ytrace, Dash exclusively ytrace — enforce at read.
@@ -778,16 +1146,37 @@ pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
             }
         }
     }
-    // ⭐ Overview is pinned first; everything else sorts by (mode, id).
-    //
-    // Sorting on id alone put the shelf in alphabetical order, which buried the
-    // one notebook that is the default view somewhere in the middle of its own
-    // shelf — `dash-angry-gui` sorts before `overview`.
+    fn shelf_rank(notebook: &Notebook) -> u8 {
+        match (notebook.mode.as_str(), notebook.id.as_str()) {
+            ("top", OVERVIEW_ID) => 0,
+            ("top", TOP_YGGDRASIL_ID) => 1,
+            ("top", TOP_CLINIC_ID) => 2,
+            ("top", "top-legendary-bugs") => 3,
+            ("dash", DASH_HOME_ID) => 0,
+            ("dash", DASH_TRACING_GUIDE_ID) => 1,
+            ("dash", OVERVIEW_ID) => 2,
+            ("dash", "dash-legendary-bugs") => 3,
+            _ => 100,
+        }
+    }
+
+    // Shipped books lead in reading order. Newest agent-composed books follow;
+    // a recomposed title replaces its older row instead of growing a wall of
+    // indistinguishable duplicates.
     out.sort_by(|a, b| {
-        is_overview(&b.id)
-            .cmp(&is_overview(&a.id))
-            .then(a.mode.cmp(&b.mode))
+        a.mode
+            .cmp(&b.mode)
+            .then(shelf_rank(a).cmp(&shelf_rank(b)))
+            .then(b.created_at_ms.cmp(&a.created_at_ms))
+            .then(a.title.cmp(&b.title))
             .then(a.id.cmp(&b.id))
+    });
+    let mut titles = std::collections::HashSet::new();
+    out.retain(|notebook| {
+        titles.insert((
+            notebook.mode.clone(),
+            notebook.title.trim().to_lowercase(),
+        ))
     });
     out
 }
@@ -805,6 +1194,238 @@ pub fn write_notebook(nb: &Notebook) -> anyhow::Result<std::path::PathBuf> {
     Ok(path)
 }
 
+#[derive(Default)]
+struct PreviewState {
+    markdown: Option<String>,
+    updated: Option<Instant>,
+    loading: bool,
+}
+
+fn preview_cache() -> &'static Mutex<HashMap<String, PreviewState>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, PreviewState>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Return a cached ytrace summary and refresh it off the request path.
+///
+/// A notebook turn must never wait for trace directories to be walked. The
+/// first frame says it is collecting; later document-version polls receive the
+/// finished table. Stale data remains visible while a refresh is running.
+pub fn ytrace_preview(page: &Page) -> Option<String> {
+    if page.ytrace_queries.is_empty() {
+        return None;
+    }
+
+    let key = page.id.clone();
+    let queries = page.ytrace_queries.clone();
+    let (visible, start) = {
+        let mut cache = preview_cache().lock().unwrap();
+        let state = cache.entry(key.clone()).or_default();
+        let fresh = state
+            .updated
+            .is_some_and(|updated| updated.elapsed() < Duration::from_secs(4));
+        let start = !fresh && !state.loading;
+        if start {
+            state.loading = true;
+        }
+        (state.markdown.clone(), start)
+    };
+
+    if start {
+        std::thread::spawn(move || {
+            let mut summaries = Vec::new();
+            for query in &queries {
+                let home = ytrace::compat::resolve_home(&query.provider);
+                let since = Some(now_ms().saturating_sub(query.since_ms as u128));
+                summaries.extend(ytrace::query::summarize(
+                    &home,
+                    Some(&query.category),
+                    since,
+                ));
+            }
+            summaries.sort_by(|a, b| {
+                b.total_ms
+                    .partial_cmp(&a.total_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            summaries.truncate(8);
+
+            let mut markdown = String::from("## Live evidence\n\n");
+            if !summaries.is_empty() {
+                let values: Vec<serde_json::Value> = summaries
+                    .iter()
+                    .map(|summary| {
+                        serde_json::json!({
+                            "x": format!("{}/{}", summary.category, summary.name),
+                            "y": summary.p95_ms,
+                            "label": format!(
+                                "{}/{} · p95 {:.1} ms · {} samples",
+                                summary.category, summary.name, summary.p95_ms, summary.count
+                            )
+                        })
+                    })
+                    .collect();
+                let window_ms = queries
+                    .iter()
+                    .map(|query| query.since_ms)
+                    .max()
+                    .unwrap_or(60_000);
+                let window = format!("last {} min", window_ms / 60_000);
+                let query_source = queries
+                    .iter()
+                    .map(|query| {
+                        format!(
+                            "from {}\n| where category == {:?}\n| summarize duration_ms",
+                            query.provider, query.category
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                let grid_rows: Vec<Vec<String>> = summaries
+                    .iter()
+                    .map(|summary| {
+                        vec![
+                            format!("{}/{}", summary.category, summary.name),
+                            summary.count.to_string(),
+                            format!("{:.1} ms", summary.total_ms),
+                            format!("{:.1} ms", summary.p50_ms),
+                            format!("{:.1} ms", summary.p95_ms),
+                        ]
+                    })
+                    .collect();
+                let top = &summaries[0];
+                let findings: Vec<String> = summaries
+                    .iter()
+                    .take(3)
+                    .map(|summary| {
+                        format!(
+                            "{}/{}: p95 {:.1} ms across {} samples",
+                            summary.category, summary.name, summary.p95_ms, summary.count
+                        )
+                    })
+                    .collect();
+                let component = serde_json::json!({
+                    "version": 1,
+                    "kind": "panel",
+                    "spec": {
+                        "title": "Trace workbench",
+                        "subtitle": "Query, evidence, and deterministic triage in one source-readable component.",
+                        "children": [
+                            {
+                                "kind": "grid",
+                                "spec": {
+                                    "columns": 2,
+                                    "gap_px": 12,
+                                    "children": [
+                                        {
+                                            "kind": "query",
+                                            "spec": {
+                                                "title": "Current query",
+                                                "language": "ytrace",
+                                                "source": query_source,
+                                                "status": format!("{} probe summaries · refreshed from cache", summaries.len()),
+                                                "evidence": {
+                                                    "question": "Which trace records are in this result?",
+                                                    "source": "page.ytrace_queries",
+                                                    "window": window,
+                                                    "freshness": "cached for at most 4 s",
+                                                    "units": "query",
+                                                    "state": "observed",
+                                                    "reproduction": "ytrace query --app yggterm --json"
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "kind": "agent-finding",
+                                            "spec": {
+                                                "title": "Start with the largest measured tail",
+                                                "summary": format!(
+                                                    "Deterministic triage ranks {}/{} first at p95 {:.1} ms. This is a lead, not a causal claim.",
+                                                    top.category, top.name, top.p95_ms
+                                                ),
+                                                "findings": findings,
+                                                "next_question": "Does the same probe remain first after narrowing to the incident window?",
+                                                "status": "deterministic summary; interface LLM not invoked",
+                                                "evidence": {
+                                                    "question": "Where should the investigation narrow next?",
+                                                    "source": "sorted ytrace summary",
+                                                    "window": window,
+                                                    "freshness": "cached for at most 4 s",
+                                                    "units": "milliseconds",
+                                                    "state": "observed",
+                                                    "reproduction": "sort ytrace summaries by total duration and compare p95"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "kind": "plot",
+                                "spec": {
+                                    "title": "Tail latency in this trace window",
+                                    "subtitle": "p95 by probe; hover a point for the exact sample count.",
+                                    "mark": "bar",
+                                    "x_label": "probe",
+                                    "y_label": "milliseconds",
+                                    "include_zero": true,
+                                    "height": 260,
+                                    "legend": false,
+                                    "series": [{"name": "p95", "units": "ms", "values": values}],
+                                    "evidence": {
+                                        "question": "Which traced operation owns the latency tail?",
+                                        "source": "ytrace JSONL summary",
+                                        "window": window,
+                                        "freshness": "cached for at most 4 s",
+                                        "units": "milliseconds",
+                                        "state": "observed",
+                                        "reproduction": "ytrace query --app yggterm --json"
+                                    }
+                                }
+                            },
+                            {
+                                "kind": "data-grid",
+                                "spec": {
+                                    "title": "Exact result",
+                                    "columns": ["Probe", "Count", "Total", "p50", "p95"],
+                                    "rows": grid_rows,
+                                    "compact": true,
+                                    "evidence": {
+                                        "question": "What exact values support the plot?",
+                                        "source": "ytrace JSONL summary",
+                                        "window": window,
+                                        "freshness": "cached for at most 4 s",
+                                        "units": "milliseconds",
+                                        "state": "observed",
+                                        "reproduction": "ytrace query --app yggterm --json"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                });
+                markdown.push_str("```emd\n");
+                markdown.push_str(&component.to_string());
+                markdown.push_str("\n```\n\n");
+            }
+            if summaries.is_empty() {
+                markdown.push_str("> No records in this window. No sample is not a healthy zero. Check the probe map and retention window.\n");
+            }
+
+            let mut cache = preview_cache().lock().unwrap();
+            let state = cache.entry(key).or_default();
+            state.markdown = Some(markdown);
+            state.updated = Some(Instant::now());
+            state.loading = false;
+        });
+    }
+
+    Some(visible.unwrap_or_else(|| {
+        "## Live evidence\n\nCollecting the first trace window… The notebook remains interactive while this loads."
+            .to_string()
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,7 +1437,7 @@ mod tests {
             .find(|n| n.id == "dash-sysinternals")
             .expect("the SysInternals notebook is a base notebook, not a composed one");
         assert_eq!(nb.mode, "dash");
-        assert_eq!(nb.title, "yggterm SysInternals");
+        assert_eq!(nb.title, "Yggterm SysInternals");
         assert!(nb.pages.len() >= 5, "the armings, the rows, the last-fired times, the graphs, and the dream-mode walkthroughs");
     }
 
@@ -933,28 +1554,26 @@ mod tests {
 mod overview_tests {
     use super::*;
 
-    /// ⭐ The dashboard must be ON the shelf, not beside it — that is the whole
-    /// point of Overview, and it must exist in BOTH modes.
+    /// Each mode has one explicit home in the first shelf row.
     #[test]
-    fn overview_is_the_first_notebook_in_every_mode() {
-        for mode in ["top", "dash"] {
-            let shelf = list_notebooks(Some(mode));
-            assert!(!shelf.is_empty(), "{mode} shelf is empty");
-            assert!(
-                is_overview(&shelf[0].id),
-                "{mode} shelf does not open on Overview: {}",
-                shelf[0].id
-            );
-            assert_eq!(shelf[0].title, "Overview");
-            assert_eq!(shelf[0].mode, mode);
-        }
+    fn home_notebook_is_first_in_every_mode() {
+        let top = list_notebooks(Some("top"));
+        assert_eq!(top[0].id, OVERVIEW_ID);
+        assert_eq!(top[0].title, "System Top");
+
+        let dash = list_notebooks(Some("dash"));
+        assert_eq!(dash[0].id, DASH_HOME_ID);
+        assert_eq!(dash[0].title, "Yggterm SysInternals");
     }
 
     /// Its page is a WINDOW, not paper: composed from the live probe.
     #[test]
     fn the_overview_page_is_live() {
         for mode in ["top", "dash"] {
-            let nb = list_notebooks(Some(mode)).remove(0);
+            let nb = list_notebooks(Some(mode))
+                .into_iter()
+                .find(|notebook| is_overview(&notebook.id))
+                .expect("Overview remains addressable from both shelves");
             assert_eq!(nb.pages.len(), 1);
             assert!(nb.pages[0].composed, "{mode} Overview page must be composed at render time");
             assert_eq!(nb.pages[0].id, overview_page_id(mode));
@@ -967,8 +1586,14 @@ mod overview_tests {
     /// Resolving by id alone opened the Top page while standing in Dash.
     #[test]
     fn the_two_overviews_share_an_id_but_never_a_page() {
-        let top = list_notebooks(Some("top")).remove(0);
-        let dash = list_notebooks(Some("dash")).remove(0);
+        let top = list_notebooks(Some("top"))
+            .into_iter()
+            .find(|notebook| is_overview(&notebook.id))
+            .unwrap();
+        let dash = list_notebooks(Some("dash"))
+            .into_iter()
+            .find(|notebook| is_overview(&notebook.id))
+            .unwrap();
         assert_eq!(top.id, dash.id);
         assert_ne!(top.pages[0].id, dash.pages[0].id);
         assert_eq!(overview_page_id("top"), "overview-top");
@@ -1015,7 +1640,7 @@ mod overview_tests {
 
         let overviews: Vec<&Notebook> = shelf.iter().filter(|n| is_overview(&n.id)).collect();
         assert_eq!(overviews.len(), 1, "exactly one Overview must survive");
-        assert_eq!(overviews[0].title, "Overview", "the impostor won");
+        assert_eq!(overviews[0].title, "System Top", "the impostor won");
         assert!(overviews[0].pages[0].composed);
     }
 
