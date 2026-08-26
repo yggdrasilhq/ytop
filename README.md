@@ -79,6 +79,26 @@ These are the ones that changed the code, not just the prose:
 
 `ytop` in **Dash mode** is the DTrace notebook — `ytrace query --app <app> --category <cat> --since <window> --top N` tables + `tail` timeline + `incidents` ranked by `trigger`. It goes beyond Chrome DevTools because it sees cross-process, cross-host spans (`web/policy` fetch, `SurfacePolicyGate::Pending`, `ssh -L` vs `ssh -D`).
 
+**A page can have a live half.** Shipped prose is frozen the moment it compiles, which is right for
+a story and useless for a state — "who is armed" and "when did that last fire" go stale in minutes.
+So a page may name one **live reading** that the viewport fills at render time from the same files
+the CLIs read. `yggterm SysInternals` is the notebook built on it: the two supervision planes joined
+row by row, the seat census, every watcher's last-fired time against its cadence, the graphs, and
+four walkthroughs of what the machinery is *for*.
+
+⛔ **Membership is a fact; dueness is a judgement.** A live block renders which rows are in which
+store and the fields those stores wrote about themselves. Whether a one-plane row is a *gap*, a
+deliberate stand-down, or a corpse mid-countdown belongs to the watchdogs' own verbs — a second copy
+of that reasoning here would drift, and then disagree about a live row on the day it mattered.
+
+Notebooks are readable with no GUI at all, for the same reason the rest of ytop is:
+
+```
+$ ytop --notebook                            # the shelf
+$ ytop --notebook dash-sysinternals          # its pages
+$ ytop --notebook dash-sysinternals --page 3 # one page, live blocks filled in
+```
+
 ## Building
 
 ```
