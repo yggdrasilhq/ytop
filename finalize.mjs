@@ -23,9 +23,14 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const NAME = process.env.YNPM_BIN_NAME;
-const PACKAGE = process.env.YNPM_PACKAGE_NAME;
-const PLATFORM = process.env.YNPM_PLATFORM;
+const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+// Self-sufficient under plain `npm i -g`: derive package name, binary and
+// platform from the install itself. The ynpm installer may still pin all
+// three via env (its fleet sync targets a chosen platform explicitly).
+const NAME = process.env.YNPM_BIN_NAME || Object.keys(pkgJson.bin || {})[0];
+const PACKAGE = process.env.YNPM_PACKAGE_NAME || pkgJson.name;
+const PLATFORM =
+  process.env.YNPM_PLATFORM || `${process.platform}-${process.arch}`;
 
 function fail(message) {
   console.error(`ynpm finalize: ${message}`);
@@ -33,7 +38,7 @@ function fail(message) {
 }
 
 if (!NAME || !PACKAGE || !PLATFORM) {
-  fail("YNPM_BIN_NAME / YNPM_PACKAGE_NAME / YNPM_PLATFORM must be set by the installer");
+  fail("could not derive YNPM_BIN_NAME / YNPM_PACKAGE_NAME / YNPM_PLATFORM");
 }
 
 const shimPath = path.join(__dirname, "bin", NAME);
