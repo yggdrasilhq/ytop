@@ -51,6 +51,10 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          # The build jobs run no actions/setup-node, so nothing wrote the
+          # auth mapping — npm publish answered ENEEDAUTH (run 33112881416,
+          # the first run whose failures were honest). Write it directly.
+          echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > ~/.npmrc
           cd "pack/@ygghq/ytop-${{ matrix.target }}"
           # ⛔ IDEMPOTENCE WITHOUT Lying. The old `|| echo already published`
           # swallowed EVERY failure — a broken package.json (the literal-`{{`
