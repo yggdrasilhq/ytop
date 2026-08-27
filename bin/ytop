@@ -1,30 +1,47 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * The ynpm entry shim. Resolves this package's platform binary — the
- * finalize postinstall copies it to bin/ytop.platform when it can, and the
- * @ygghq/<name>-<platform> sibling always has it once npm has placed the
- * tree — then execs it. A JS shim is deliberately permanent: a binary
- * overwrites and npm's script-timing races cannot break it.
+ * The ynpm entry shim — permanent by design, no install step may be
+ * required for it to work.
+ *
+ * Resolves this package's platform binary in the places the ecosystem
+ * actually puts it: the finalize fast copy (bin/ytop.platform), the
+ * platform package nested beside this one (npm's global layout nests it
+ * under the package's own node_modules), or as a flat sibling. Walks the
+ * node_modules chain so every layout lands.
  */
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+const pkgRoot = path.join(__dirname, "..");
+const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, "package.json"), "utf8"));
 const name = Object.keys(pkg.bin || { ytop: true })[0];
 const shortName = pkg.name.includes("/") ? pkg.name.split("/")[1] : pkg.name;
 const platform = `${process.platform}-${process.arch}`;
+const scopeDir = `@ygghq`;
+const rel = path.join(scopeDir, `${shortName}-${platform}`, "bin", name);
 
-const candidates = [
-  path.join(__dirname, "bin", name + ".platform"),
-  path.join(__dirname, "..", "@ygghq", `${shortName}-${platform}`, "bin", name),
-];
+const candidates = [path.join(__dirname, "bin", name + ".platform")];
+
+// Every node_modules root from this package upward (nested, sibling, and
+// any grandparent layout an installer or an pnpm-style store produces).
+let dir = pkgRoot;
+for (let i = 0; i < 6; i++) {
+  const nm = dir.lastIndexOf(path.join("node_modules"));
+  if (nm === -1) break;
+  dir = dir.slice(0, nm + "node_modules".length);
+  candidates.push(path.join(dir, rel));
+  const up = path.dirname(dir);
+  if (up === dir) break;
+  dir = up;
+}
+
 const target = candidates.map((c) => [c, fs.existsSync(c)]).find(([, ok]) => ok);
 
 if (!target) {
   console.error(
-    `ytop: no binary for ${platform} — @ygghq/${shortName}-${platform} is missing; reinstall the package`
+    `ytop: no binary for ${platform} — ${scopeDir}/${shortName}-${platform} is missing; reinstall the package (or allow its install scripts so finalize can copy it)`
   );
   process.exit(1);
 }

@@ -41,12 +41,15 @@ if (!NAME || !PACKAGE || !PLATFORM) {
 }
 
 const shortName = PACKAGE.includes("/") ? PACKAGE.split("/")[1] : PACKAGE;
-const platformBinary = path.join(
-  __dirname, "..", "@ygghq", `${shortName}-${PLATFORM}`, "bin", NAME
-);
+// The platform package may sit NESTED under this package's own
+// node_modules (npm 11 global layout) or as a flat sibling. Try both.
+const platformBinary = [
+  path.join(__dirname, "node_modules", "@ygghq", `${shortName}-${PLATFORM}`, "bin", NAME),
+  path.join(__dirname, "..", "node_modules", "@ygghq", `${shortName}-${PLATFORM}`, "bin", NAME),
+].find((c) => fs.existsSync(c));
 const fastCopy = path.join(__dirname, "bin", NAME + ".platform");
 
-if (!fs.existsSync(platformBinary)) {
+if (!platformBinary) {
   fail(`${shortName}-${PLATFORM} is not installed beside this package - the shim will not find a binary for this platform`);
 }
 

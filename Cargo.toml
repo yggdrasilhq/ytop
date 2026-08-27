@@ -1,6 +1,6 @@
 [package]
 name = "ytop"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "htop + fleet rows + booter for yggterm — machines, agent rows, and supervision as a libyggterm document-surface app"
