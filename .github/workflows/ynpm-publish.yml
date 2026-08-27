@@ -48,6 +48,7 @@ jobs:
           cp "$BUILT/$EXE" "pack/@ygghq/ytop-$TARGET/bin/ytop"
           printf '{"name":"@ygghq/ytop-%s","version":"0.1.0","bin":{"ytop":"bin/ytop"},"os":[],"cpu":[],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" > "pack/@ygghq/ytop-$TARGET/package.json"
       - name: Publish platform package
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
