@@ -1,0 +1,6 @@
+#!/bin/sh
+# Placeholder: the ynpm finalize postinstall overwrites this with the
+# platform binary at install time. If you are reading this, that step
+# did not run.
+echo "ytop: not finalized — reinstall the package (postinstall missing)" >&2
+exit 1

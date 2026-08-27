@@ -56,7 +56,7 @@ jobs:
           esac
           mkdir -p "pack/@ygghq/ytop-$TARGET/bin"
           cp "$BUILT/$EXE" "pack/@ygghq/ytop-$TARGET/bin/ytop"
-          printf '{"name":"@ygghq/ytop-%s","version":"0.1.2","bin":{"ytop":"bin/ytop"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" "$PKG_OS" "$PKG_CPU" > "pack/@ygghq/ytop-$TARGET/package.json"
+          printf '{"name":"@ygghq/ytop-%s","version":"0.1.3","bin":{"ytop":"bin/ytop"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" "$PKG_OS" "$PKG_CPU" > "pack/@ygghq/ytop-$TARGET/package.json"
       - name: Publish platform package
         shell: bash
         env:
