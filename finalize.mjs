@@ -10,10 +10,18 @@
  * First-party script: ships in yggdrasilhq's own package, from the same repo
  * as the binary. The boundary is the vendor-script boundary: HOME intact, no
  * privilege escalation, stdin closed by the installer.
+ *
+ * ESM: the file is .mjs (npm runs postinstall with the package's type), so
+ * `require` is undefined here — import instead. Live-fenced: the first
+ * `npm i -g @ygghq/ytop` died exactly there.
  */
-const fs = require("fs");
-const path = require("path");
-const { execFileSync } = require("child_process");
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const NAME = process.env.YNPM_BIN_NAME;
 const PACKAGE = process.env.YNPM_PACKAGE_NAME;
