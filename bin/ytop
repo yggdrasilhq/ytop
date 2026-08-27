@@ -1,6 +1,37 @@
-#!/bin/sh
-# Placeholder: the ynpm finalize postinstall overwrites this with the
-# platform binary at install time. If you are reading this, that step
-# did not run.
-echo "ytop: not finalized — reinstall the package (postinstall missing)" >&2
-exit 1
+#!/usr/bin/env node
+'use strict';
+/**
+ * The ynpm entry shim. Resolves this package's platform binary — the
+ * finalize postinstall copies it to bin/ytop.platform when it can, and the
+ * @ygghq/<name>-<platform> sibling always has it once npm has placed the
+ * tree — then execs it. A JS shim is deliberately permanent: a binary
+ * overwrites and npm's script-timing races cannot break it.
+ */
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+const name = Object.keys(pkg.bin || { ytop: true })[0];
+const shortName = pkg.name.includes("/") ? pkg.name.split("/")[1] : pkg.name;
+const platform = `${process.platform}-${process.arch}`;
+
+const candidates = [
+  path.join(__dirname, "bin", name + ".platform"),
+  path.join(__dirname, "..", "@ygghq", `${shortName}-${platform}`, "bin", name),
+];
+const target = candidates.map((c) => [c, fs.existsSync(c)]).find(([, ok]) => ok);
+
+if (!target) {
+  console.error(
+    `ytop: no binary for ${platform} — @ygghq/${shortName}-${platform} is missing; reinstall the package`
+  );
+  process.exit(1);
+}
+
+const res = spawnSync(target[0], process.argv.slice(2), { stdio: "inherit" });
+if (res.error) {
+  console.error(`ytop: failed to exec ${target[0]}: ${String(res.error)}`);
+  process.exit(1);
+}
+process.exit(res.status == null ? 0 : res.status);
