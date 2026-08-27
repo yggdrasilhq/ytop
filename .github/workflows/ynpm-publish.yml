@@ -44,9 +44,19 @@ jobs:
           set -e
           BUILT="target/release"; [ -n "$TRIPLE" ] && BUILT="target/$TRIPLE/release"
           EXE="ytop"; case "$TARGET" in win32-*) EXE="ytop.exe";; esac
+          # Per-target os/cpu: the installer then pulls ONE platform package
+          # instead of all six (optionalDependencies resolve by platform).
+          case "$TARGET" in
+            linux-x64)   PKG_OS=linux;  PKG_CPU=x64 ;;
+            linux-arm64) PKG_OS=linux;  PKG_CPU=arm64 ;;
+            darwin-x64)  PKG_OS=darwin; PKG_CPU=x64 ;;
+            darwin-arm64) PKG_OS=darwin; PKG_CPU=arm64 ;;
+            win32-x64)   PKG_OS=win32;  PKG_CPU=x64 ;;
+            win32-arm64) PKG_OS=win32;  PKG_CPU=arm64 ;;
+          esac
           mkdir -p "pack/@ygghq/ytop-$TARGET/bin"
           cp "$BUILT/$EXE" "pack/@ygghq/ytop-$TARGET/bin/ytop"
-          printf '{"name":"@ygghq/ytop-%s","version":"0.1.0","bin":{"ytop":"bin/ytop"},"os":[],"cpu":[],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" > "pack/@ygghq/ytop-$TARGET/package.json"
+          printf '{"name":"@ygghq/ytop-%s","version":"0.1.1","bin":{"ytop":"bin/ytop"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" "$PKG_OS" "$PKG_CPU" > "pack/@ygghq/ytop-$TARGET/package.json"
       - name: Publish platform package
         shell: bash
         env:

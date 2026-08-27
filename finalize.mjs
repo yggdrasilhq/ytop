@@ -37,8 +37,11 @@ if (!NAME || !PACKAGE || !PLATFORM) {
 }
 
 const shimPath = path.join(__dirname, "bin", NAME);
+// The platform package is a SIBLING under node_modules: up two from
+// node_modules/@ygghq/ytop lands on node_modules, then back down into the
+// scope. (An earlier draft climbed three and looked past the prefix.)
 const platformBinary = path.join(
-  __dirname, "..", "..", "..", `${PACKAGE}-${PLATFORM}`, "bin", NAME
+  __dirname, "..", "..", `${PACKAGE}-${PLATFORM}`, "bin", NAME
 );
 
 if (!fs.existsSync(platformBinary)) {
