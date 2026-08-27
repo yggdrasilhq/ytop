@@ -46,13 +46,23 @@ jobs:
           EXE="ytop"; case "$TARGET" in win32-*) EXE="ytop.exe";; esac
           mkdir -p "pack/@ygghq/ytop-$TARGET/bin"
           cp "$BUILT/$EXE" "pack/@ygghq/ytop-$TARGET/bin/ytop"
-          printf '{{"name":"@ygghq/ytop-%s","version":"0.1.0","bin":{{"ytop":"bin/ytop"}},"os":[],"cpu":[],"license":"GPL-3.0-or-later"}}\n' "$TARGET" > "pack/@ygghq/ytop-$TARGET/package.json"
+          printf '{"name":"@ygghq/ytop-%s","version":"0.1.0","bin":{"ytop":"bin/ytop"},"os":[],"cpu":[],"license":"GPL-3.0-or-later"}\n' "$TARGET" > "pack/@ygghq/ytop-$TARGET/package.json"
       - name: Publish platform package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd "pack/@ygghq/ytop-${{ matrix.target }}"
-          npm publish --access public --provenance || echo "version already published"
+          # ⛔ IDEMPOTENCE WITHOUT Lying. The old `|| echo already published`
+          # swallowed EVERY failure — a broken package.json (the literal-`{{`
+          # printf bug this run fixed) reported as a clean skip, and the run
+          # went green having published nothing. Only the genuine
+          # already-published conflict is a skip; every other error fails the
+          # step with its real output.
+          if ! npm publish --access public --provenance 2>pub_err.txt; then
+            grep -qE "EPUBLISHCONFLICT|previously published|cannot publish over" pub_err.txt || { cat pub_err.txt >&2; exit 1; }
+            echo "version already published — skipping (genuine conflict)"
+          fi
+          rm -f pub_err.txt
 
   publish-main:
     needs: build
