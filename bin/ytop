@@ -22,7 +22,12 @@ const platform = `${process.platform}-${process.arch}`;
 const scopeDir = `@ygghq`;
 const rel = path.join(scopeDir, `${shortName}-${platform}`, "bin", name);
 
-const candidates = [path.join(__dirname, "bin", name + ".platform")];
+const candidates = [
+  path.join(__dirname, "bin", name + ".platform"),
+  // npm 11's global layout: the platform package NESTED under this
+  // package's own node_modules.
+  path.join(pkgRoot, "node_modules", rel),
+];
 
 // Every node_modules root from this package upward (nested, sibling, and
 // any grandparent layout an installer or an pnpm-style store produces).
