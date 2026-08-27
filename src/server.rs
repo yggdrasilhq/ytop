@@ -262,24 +262,39 @@ fn handle_conn(stream: TcpStream, state: &Mutex<PaneState>) {
                 pane.view.notice = Some("▶ Quota hold released".to_string());
                 pane.touch();
             } else if let Some(rest) = action.strip_prefix("signal_process:") {
-                if let Some((pid_str, sig_str)) = rest.split_once(':') {
-                    if let (Ok(pid), Ok(sig)) = (pid_str.parse::<i32>(), sig_str.parse::<i32>()) {
-                        let res = unsafe { libc::kill(pid, sig) };
-                        if res == 0 {
-                            let sig_name = match sig {
-                                9 => "SIGKILL (9)",
-                                15 => "SIGTERM (15)",
-                                2 => "SIGINT (2)",
-                                1 => "SIGHUP (1)",
-                                _ => "Signal",
-                            };
-                            pane.view.notice = Some(format!("⚡ Sent {sig_name} to PID {pid}"));
-                        } else {
-                            let err = std::io::Error::last_os_error();
-                            pane.view.notice = Some(format!("⛔ Failed to signal PID {pid}: {err}"));
+                // ⛔ POSIX ONLY. `libc::kill` does not exist on Windows — the
+                // win32 legs of the ynpm publish matrix proved it (E0425,
+                // run 33111806276). The signal panel is a POSIX feature; on
+                // Windows it reports honestly instead of compiling the crate
+                // out of the fleet.
+                #[cfg(unix)]
+                {
+                    if let Some((pid_str, sig_str)) = rest.split_once(':') {
+                        if let (Ok(pid), Ok(sig)) = (pid_str.parse::<i32>(), sig_str.parse::<i32>()) {
+                            let res = unsafe { libc::kill(pid, sig) };
+                            if res == 0 {
+                                let sig_name = match sig {
+                                    9 => "SIGKILL (9)",
+                                    15 => "SIGTERM (15)",
+                                    2 => "SIGINT (2)",
+                                    1 => "SIGHUP (1)",
+                                    _ => "Signal",
+                                };
+                                pane.view.notice = Some(format!("⚡ Sent {sig_name} to PID {pid}"));
+                            } else {
+                                let err = std::io::Error::last_os_error();
+                                pane.view.notice = Some(format!("⛔ Failed to signal PID {pid}: {err}"));
+                            }
+                            pane.touch();
                         }
-                        pane.touch();
                     }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = rest;
+                    pane.view.notice =
+                        Some("⛔ Process signals are POSIX-only; not available on this platform".to_string());
+                    pane.touch();
                 }
             } else if let Some(id) = action.strip_prefix("notebook_toggle:") {
                 let nb_id = id.to_string();
