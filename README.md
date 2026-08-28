@@ -30,6 +30,23 @@ beta · 32 × Example CPU E2 · kernel 9.9.9-invented
   ├─ gamma          22.1% cpu     96 procs  (lxc)
 ```
 
+## Install
+
+**ynpm** — ships with yggterm. One manager keeps every yggdrasilhq binary current across
+the whole fleet: generations with rollback, drift-watching, one command.
+
+```sh
+ynpm install @ygghq/ytop
+```
+
+**No npm, no yggterm?** One curl, straight from the registry:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/ytop/main/install.sh | sh
+```
+
+Prebuilt for linux (x64, arm64) and macOS (x64, arm64).
+
 ## What it shows
 
 **Topology.** Machines, and the yggterm hosts that live on each. Two containers
