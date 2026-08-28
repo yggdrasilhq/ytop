@@ -17,25 +17,21 @@ fn manifest_value(binary: &Path) -> Value {
         "label": "Ytop",
         "icon": "📊\u{fe0e}",
         "binary": binary.to_string_lossy(),
-        // ⛔ `row_spawn: false` on every verb, and it is not an oversight.
+        // Exactly one verb is a row: the document surface the user opens and
+        // returns to. The optional Dash shortcut remains launcher-only.
         //
         // yggterm's ROW context menu spawns a session and puts a row in the
-        // sidebar for it. ytop is a terminal-invoked TUI: none of these verbs is
-        // a session anyone wants a persistent sidebar row for, and offering them
-        // there gave the user rows for things that were never sessions. The app
-        // is the only party that can know this — yggterm would have to hardcode
-        // another app's name to guess it — so the manifest says so.
+        // sidebar for it. `New Ytop` is that foreground session. Dash is a
+        // launch mode for the same app, not an extra row-context verb.
         //
-        // ⚠ It removes them from the ROW menu ONLY. The titlebar `+` and the
-        // start page still offer all three, because opening a dashboard from
-        // there is exactly what those surfaces are for.
+        // `row_spawn` only controls the row context menu. The titlebar `+` and
+        // start page still offer every verb.
         //
         // The flag defaults to true, so this is an opt-out and older yggterm
         // builds that do not know the field simply ignore it.
         "verbs": [
-            { "id": "open", "label": "Fleet topology", "args": [], "row_spawn": false },
-            { "id": "booter", "label": "Fleet booter", "args": ["--tab", "booter"], "row_spawn": false },
-            { "id": "dash", "label": "Dash notebooks", "args": ["--tab", "dash"], "row_spawn": false },
+            { "id": "new", "label": "New Ytop", "args": [], "row_spawn": true },
+            { "id": "dash", "label": "Dash notebooks", "args": ["--mode", "dash"], "row_spawn": false },
         ],
     })
 }
@@ -65,22 +61,20 @@ mod tests {
         let value = manifest_value(Path::new("/usr/local/bin/ytop"));
         assert_eq!(value["name"], "ytop");
         assert!(value["binary"].as_str().unwrap().starts_with('/'));
-        assert_eq!(value["verbs"].as_array().unwrap().len(), 3);
+        assert_eq!(value["verbs"].as_array().unwrap().len(), 2);
     }
 
-    /// ⛔ NONE of ytop's verbs is a session row. A row menu that offered them
-    /// gave the user sidebar rows for a TUI that was never a session, which is
-    /// what the flag exists to stop — and only this manifest can say so.
+    /// The context menu's one launch affordance is deliberately a real row:
+    /// Ytop is a foreground document-surface app and the row is how the user
+    /// returns to it. The Dash shortcut remains launcher-only.
     #[test]
-    fn no_verb_asks_to_become_a_sidebar_row() {
+    fn only_new_ytop_asks_to_become_a_sidebar_row() {
         let value = manifest_value(Path::new("/usr/local/bin/ytop"));
-        for verb in value["verbs"].as_array().unwrap() {
-            assert_eq!(
-                verb["row_spawn"],
-                serde_json::json!(false),
-                "{} would spawn a row",
-                verb["id"],
-            );
-        }
+        let verbs = value["verbs"].as_array().unwrap();
+        assert_eq!(verbs[0]["label"], "New Ytop");
+        assert_eq!(verbs[0]["row_spawn"], serde_json::json!(true));
+        assert!(verbs[1..]
+            .iter()
+            .all(|verb| verb["row_spawn"] == serde_json::json!(false)));
     }
 }

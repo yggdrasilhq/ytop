@@ -1,7 +1,6 @@
 pub mod booter;
 pub mod complaints;
 pub mod fleet;
-pub mod harness;
 pub mod legendary;
 pub mod manifest;
 pub mod notebook;
@@ -13,4 +12,3 @@ pub mod schema;
 pub mod server;
 pub mod sysinternals;
 pub mod timeline;
-pub mod trace;

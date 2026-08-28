@@ -411,19 +411,6 @@ fn control_master_options() -> Vec<String> {
 /// machine is idle" are different facts, and a topology that renders the first
 /// as the second is worse than one that shows nothing: it invites a decision.
 pub fn read_host(host: Option<&str>, timeout: Duration) -> Value {
-    let _span = if host.is_none() {
-        crate::trace::span_with(
-            "probe",
-            "host_local",
-            serde_json::json!({ "sample_ms": CPU_SAMPLE_MS }),
-        )
-    } else {
-        crate::trace::span_with(
-            "probe",
-            "host_remote",
-            serde_json::json!({ "host": host, "sample_ms": CPU_SAMPLE_MS }),
-        )
-    };
     let mut command = match host {
         None => {
             let mut c = Command::new("python3");
@@ -506,6 +493,51 @@ pub fn read_host(host: Option<&str>, timeout: Duration) -> Value {
     }
 }
 
+/// Send one explicitly whitelisted POSIX signal to a sampled process.
+///
+/// This is invoked only by the signal chooser in System Top. No shell parses
+/// the local path; the remote path uses fixed signal and numeric PID tokens.
+pub fn send_signal(host: Option<&str>, pid: i64, signal: &str) -> anyhow::Result<()> {
+    if pid <= 1 {
+        anyhow::bail!("refusing to signal protected PID {pid}");
+    }
+    if pid == std::process::id() as i64 {
+        anyhow::bail!("refusing to signal Ytop itself");
+    }
+    if !matches!(signal, "TERM" | "INT" | "HUP" | "KILL") {
+        anyhow::bail!("unsupported signal {signal}");
+    }
+
+    let mut command = if let Some(host) = host {
+        let mut command = Command::new("ssh");
+        command.arg("-o").arg("BatchMode=yes");
+        for option in control_master_options() {
+            command.arg("-o").arg(option);
+        }
+        command.arg(host).arg("/bin/kill");
+        command
+    } else {
+        Command::new("/bin/kill")
+    };
+    let output = command
+        .arg(format!("-{signal}"))
+        .arg("--")
+        .arg(pid.to_string())
+        .output()?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        anyhow::bail!(
+            "signal {signal} to PID {pid} failed{}",
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {detail}")
+            }
+        );
+    }
+    Ok(())
+}
+
 fn unreachable(host: &str, why: &str) -> Value {
     serde_json::json!({
         "ok": false,
@@ -547,6 +579,13 @@ pub fn machine_key(reading: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn signal_actions_reject_protected_and_unknown_targets_before_spawning() {
+        assert!(send_signal(None, 1, "TERM").is_err());
+        assert!(send_signal(None, 4242, "INVENTED").is_err());
+        assert!(send_signal(None, std::process::id() as i64, "TERM").is_err());
+    }
 
     fn reading(kernel: &str, btime: i64, cpu: &str, cores: i64) -> Value {
         json!({"ok": true, "kernel": kernel, "btime": btime,

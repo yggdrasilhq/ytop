@@ -31,14 +31,6 @@ fn emit(verb: &str, action: &str, payload: &str) {
 /// per heartbeat, which is a leak that looks like a working app for the first
 /// few minutes.
 pub fn emit_declare(session: &str, control: &str, document_version: &str) {
-    crate::trace::event(
-        "osc",
-        "heartbeat",
-        json!({
-            "session": session,
-            "document_version": document_version
-        }),
-    );
     let payload = json!({
         "session": session,
         "control": control,

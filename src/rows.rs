@@ -476,7 +476,6 @@ fn probe_yggterm_fallback() -> Option<FleetRowsReport> {
 }
 
 pub fn scan_all_hosts() -> FleetRowsReport {
-    let _span = crate::trace::span("supervision", "census");
     let dev_report = probe_rows(Some("dev"), Duration::from_secs(12));
     if let Some(r) = dev_report {
         if r.total_rows > 0 {

@@ -3,7 +3,6 @@
 mod booter;
 mod complaints;
 mod fleet;
-mod harness;
 mod legendary;
 mod manifest;
 mod notebook;
@@ -15,7 +14,6 @@ mod schema;
 mod server;
 mod sysinternals;
 mod timeline;
-mod trace;
 
 use anyhow::Result;
 use clap::Parser;
@@ -95,7 +93,7 @@ fn main() -> Result<()> {
     let control = server::spawn()?;
     {
         let mut pane = control.state.lock().unwrap();
-        pane.view.mode = args.mode.clone();
+        pane.view.select_mode(&args.mode);
     }
 
     let running = Arc::new(AtomicBool::new(true));
