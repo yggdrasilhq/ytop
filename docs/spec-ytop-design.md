@@ -1,7 +1,12 @@
 # Spec: `ytop` — Modern Fleet Infrastructure & Agent Cockpit
 
-**Status:** PROPOSED (2026-08-15)  
+**Status:** ACTIVE (original 2026-08-15; notebook-first UX revision 2026-08-26)
 **Target Repositories:** `ytop` (`~/gh/ytop`), `yggterm` (`~/gh/yggterm`), `libyggterm` (`~/gh/libyggterm`)
+
+`DESIGN.md` is the canonical visual contract. `docs/spec-notebook-runtime.md`
+and `docs/spec-observability-graphics.md` own live runtime and plot details.
+Where older examples below disagree, those documents and the 2026-08-26
+revision win.
 
 ---
 
@@ -9,9 +14,9 @@
 
 `ytop` replaces unstyled, terminal-dump telemetry with a **modern, rich, colorful desktop-class monitoring and operations console** inside Yggterm's `libyggterm` document-surface architecture.
 
-It provides a unified, real-time control plane across two fundamental operational modes:
-1. **`Top` (Infrastructure & Host Topology)**: Physical & virtual machines, LXC containers with collapsible process consumption trees, ZFS storage health & real-time `zpool iostat`, and persistent multi-host management.
-2. **`Dash` (Yggterm Agent Fleet Cockpit)**: Complete $N.x$ agent row census, real-time per-row CPU/Memory footprint, token context budget gauges, "resource jankbox" bottleneck profiling, and live supervision controls (Booter/Monitor/Quota Holds).
+It provides a unified, real-time control plane across two complementary operational modes:
+1. **`Top` (Non-ytrace / Uninstrumented Hosts)**: Anything **without** a `ytrace` probe — raw kernel, third-party daemons, bare-metal host debugging, foreign app `strace`/`perf` without the `ytrace` SDK. This is the htop/ZFS/LXC/top fallback for hosts and subsystems that have not been instrumented. It ships no `ytrace` dependency by construction.
+2. **`Dash` (Full-Trace Cockpit — NO LIMITATIONS)**: The canonical debugging surface for the fleet. **Dash has no cap** — it includes *everything Top has* **plus** the full `ytrace` bus: `host/cpu_delta`, `host/zfs` (`zpool iostat`/`arcstat`/`zil_commit`), `host/ebpf` (`sched_switch`/`io_uring`/`zfs_delay`), `daemon_request` hot paths, `render`/`xterm` storms, `attach`/`session`/`usability`, `ychrome`/`web` surfaces, and any app that links `ytrace` (`yggterm`, `ychrome`, `yedit`, `yggtopo`, `paper`, `cellulose`). Flamegraphs, cross-layer correlation (`web/policy × render × zfs_delay` in one query), and analytics live here. When a trace exists, Dash is where it is read.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -45,9 +50,14 @@ It provides a unified, real-time control plane across two fundamental operationa
 
 ## 2. Core UI Philosophy & Aesthetics (DESIGN.md Alignment)
 
-1. **No Raw Markdown Tables in the Main Viewport**:
-   - The viewport is rendered as **native shell DOM widgets** (`card`, `section`, `meter` / proportion bars, metric grids, status badges, interactive list rows, collapsible container nodes, process breakdown tables).
-   - Inherits Yggterm’s background gradient, soft shadows, rounded surfaces, and crisp typography.
+1. **One shared document engine**:
+   - Notebook prose and scientific figures use `emd-renderer`, the shared
+     libyggterm extended-markdown engine. Ytop does not carry private HTML,
+     graph, or markdown rendering code.
+   - Native shell widgets provide rail navigation, actions, forms, loading
+     state, and structured live rows around the document.
+   - Tables are appropriate for exact comparisons. ASCII gauges and raw trace
+     dumps are transitional, not the final visualization language.
 2. **Color-Coded Status & Health Tokens**:
    - **Emerald / Green (`durable`)**: Healthy processes, online ZFS pools, active normal agents.
    - **Sky Blue (`transient`)**: Running LXC containers, temporary tasks.
@@ -59,26 +69,73 @@ It provides a unified, real-time control plane across two fundamental operationa
 
 ---
 
+## 2.5. Every operational surface is a notebook
+
+There is no nameless dashboard beside the notebook product.
+
+- Top opens the live `System Top` notebook. Its rail contains only notebook
+  titles; a document-bar switcher inherits logical hosts from the launching
+  Yggterm without collapsing guests that share one physical kernel.
+- Dash also contains only notebooks and opens `Yggterm SysInternals`. Fleet totals,
+  monitor/booter health, row costs, histories, problems, and overrides are
+  pages in that book—not a second control partition above it.
+- Shelf rows are flat, title-only entries. No book icons, folder glyphs, page
+  children, page counts, descriptions, status dots, Compose button, or manual
+  Refresh button.
+- Base books ship in this repository. Agents compose additional books
+  programmatically in the Ytop data directory.
+- Live evidence refreshes independently of prose and navigation. Pane reads
+  return cached or collecting state immediately and never hold the global state
+  lock while walking trace files or notebook storage.
+
 ## 3. Top-Level Mode Architecture
 
-The application titlebar / header hosts the primary mode toggle:
-- `[ ⚡ Top ]`: Infrastructure, machines, ZFS, LXC containers, host processes.
-- `[ 📊 Dash ]`: Yggterm agent fleet rows, resource jankbox profiling, supervision & watchdog controls.
+The application titlebar hosts the primary mode toggle:
+- `[ Top ]`: fast system reading—fleet selection, raw host/ZFS/LXC/process
+  evidence, interval CPU, and explicit operational actions. It works without a
+  ytrace emitter.
+- `[ Dash ]`: the ytrace notebook shelf—cross-layer histories, flamegraphs,
+  topology, app/browser/service correlation, alerts, and agent analysis.
+
+> **Invariant (2026-08-23):** Dash is a strict superset of Top. Anything Top can show, Dash can show with trace context. Nothing Dash can trace is withheld to keep Top “distinct.”
 
 ---
 
-## 4. `Top` View (Infrastructure & Host Topology)
+## 4. `Top` View (Non-ytrace Fallback — Infrastructure & Host Topology for Uninstrumented Hosts)
 
-### 4.1. Connected Machines Sidebar & Persistent Machine Registry
+> **Scope (2026-08-23):** Top exists for the **complement** of `ytrace`. When a host or app already emits `ytrace`, prefer Dash — it shows the same infra plus the trace. Top's value is *zero-dependency* visibility: no SDK, no daemon, just the probe over ssh on stdin.
+
+### 4.1. Connected-host switcher & persistent machine registry
+
+Machines are selected in `System Top`'s document bar. They are not a second
+partition in the notebook rail; the entire rail remains available to the flat
+book shelf.
+
 - **Sources of Machines**:
   1. Local machine (`local` / `alpha`).
-  2. Auto-discovered remote SSH sessions from live Yggterm daemon snapshots (`server daemons`).
+  2. Auto-discovered remote SSH sessions from **every** live Yggterm daemon
+     (`server daemons` → `server snapshot --endpoint` per daemon). ⚠ Asking only
+     the busiest daemon loses machines: a remote host is known to the daemon
+     holding ITS sessions, which is not necessarily the busiest one.
   3. Stored user configurations from `~/.yggterm/config/machines.json`.
-- **`[ + Add SSH Machine ]` Action**:
-  - Modal or inline card prompting for `SSH Alias / Host`, `Label`, and optional `Tags` (e.g. `is_yggdrasil_host: true`).
-  - Persisted in structured JSON format under `~/.yggterm/config/machines.json`.
-- **Machine Row**:
-  - Host label, status dot (green=responsive, red=unreachable), instant CPU% and RAM% chips.
+
+- **⛔ DISCOVERY REGISTERS; IT DOES NOT MERELY LIST.** Every discovered machine is
+  merged into the registry and stays there. The roster is *registry ∪ today's
+  discovery*, so a machine that has gone quiet is still probed and reports as
+  **unreachable** rather than disappearing from the topology. A machine that is
+  merely down and a machine that never existed must never look the same.
+
+- **⛔ MERGING NEVER CLOBBERS.** The operator's `label` and their `is_yggdrasil`
+  flag survive every rediscovery — they carry knowledge discovery does not have.
+  Auto-detection may **fill** an unset `is_yggdrasil` (a reading showing ZFS pools
+  or containers), but may **never clear** one: a probe that timed out once must not
+  demote a machine that is a hypervisor.
+- Explicit machines may still be registered programmatically in
+  `~/.yggterm/config/machines.json`; discovery and stored configuration are
+  unioned. Ytop does not add a second machine-management UI to the rail.
+- The switcher names every logical host. Selecting one opens its live reading;
+  unreachable and collecting states are expressed in the document instead of
+  shrinking or decorating the shelf.
 
 ### 4.2. Host System Metrics Card
 - Hostname, CPU Model, Physical/Logical Cores, Kernel, Uptime.
@@ -107,10 +164,31 @@ When a machine is designated as a Yggdrasil node (or has ZFS / LXC installed):
 - Top 10-20 processes across the entire machine.
 - Sortable by CPU% or Memory RSS.
 - Interactive search/filter box.
+- Each eligible process row exposes `Kill…`; it opens an explicit `TERM`,
+  `INT`, and `KILL` chooser. TERM is the graceful default recommendation, but
+  no signal is sent until a choice is made. PID 1 and Ytop itself are protected.
 
 ---
 
-## 5. `Dash` View (Yggterm Agent Fleet Cockpit)
+## 5. `Dash` View (Full-Trace Fleet Cockpit — NO LIMITATIONS; kernel → ytrace → app → flamegraph)
+
+> **Scope (2026-08-23):** Dash has **no limitations**. It is the one place where kernel, daemon, fleet, and app traces meet. This enables true cross-layer work: a hitch in `web/policy fetch` × `render/gui` storm × `host/zfs_delay` outlier correlated in one notebook, one query, one timeline. Flamegraphs and analytics are Dash-only — Top never synthesises them from `ps`.
+
+### 5.0 Full-trace capabilities (kernel + ytrace + app)
+
+- **Kernel / Host (via `ytop::probe` + `host/*` ytrace):** `host/cpu_delta` (400 ms delta, never `ps`), `host/zfs` (`zpool iostat` / `arcstat` / `zil_commit` / `zfs list`), `host/ebpf` (`sched_switch` latency, `io_uring` queue depth, `zfs_delay` under `tracefs` where available, `perf` sampling for flamegraphs). Sampling interval is `YTOP_SAMPLE_MS` (default 400 ms); `YTOP_EBPF` gates `ebpf` collection and requires `tracefs` mount.
+- **Daemon / Fleet (via `ytrace` + `server daemons/snapshot/perf`):** `daemon_request` p50/p95/p99, `attach`/`terminal_mount`/`xterm_paint` ladder, `daemon/pty_handoff`, `session/activation` (user gesture vs internal), `render`/`xterm` storms, `resource/jankbox` (twin/leak/bloat/daemon footprint).
+- **App surfaces (via `ytrace` SDK):** `ychrome` (`web/policy` / `SurfacePolicyGate::Pending` / `ssh -L` vs `ssh -D`), `yedit`/`paper`/`cellulose`/`yggtopo` document-surface traces, `libyggterm` `emit_trace!` in viewport/rails/cwd-tree.
+- **Analytics:** Per-notebook `ytrace query --app <app> --category <cat> --since <window> --top N` tables, `tail` timeline, `incidents` ranked by `trigger`, and flamegraphs (`host/ebpf` stack folding). All queries are file-first (`ytrace query|tail|incidents|health|registry --json`), never raw `~/.local/share/ytrace` globs.
+
+### 5.0.1 Dash vs Top — when to use which
+
+| Question | Use Top | Use Dash |
+|---|---|---|
+| Host has `ytrace`? | — | **Dash** (superset) |
+| Bare host, no SDK, just need ZFS/htop? | **Top** | — (Dash would work but adds no trace) |
+| Need flamegraph / eBPF / cross-layer `web×render×zfs`? | — | **Dash** |
+| No daemon running / offline? | Top probes over ssh on stdin still work | Dash still works — `ytrace` tail reads history |
 
 ### 5.1. Agent Fleet Rows Table Card
 - Grouped by Campaign / Outline Prefix:
@@ -152,6 +230,19 @@ Dedicated diagnostic engine to explain and eliminate host lag:
 
 ---
 
+## 5.4. Row Titles — owned by yggterm, not by ytop
+
+Rows born from a launcher follow the birth-title convention
+**`New {Machine} {App}`**, implemented once in yggterm
+(`yggterm-core/src/birth_title.rs`). ⛔ ytop must NOT compose its own titles: the
+convention is one builder precisely because it was once two, and an app that
+re-derived it would restore the split.
+
+⚠ **Birth titles stamp at BIRTH.** Rows created before a build carrying the
+convention keep their old titles indefinitely — nothing re-titles an existing
+row. A screenshot showing stale titles is therefore not evidence that the
+convention is broken; check when the row was born and which build was deployed.
+
 ## 6. Widget Schema & YggUI Component Contract
 
 `ytop` declares widgets following the `libyggterm` Tier A/C specification.
@@ -159,13 +250,13 @@ Dedicated diagnostic engine to explain and eliminate host lag:
 ### 6.1. Reusable Widget Vocabulary
 | Widget Kind | Role in `ytop` |
 |---|---|
-| `section` | Card container with title, optional `card: true`, and trailing action buttons (e.g. `+ Add Machine`). |
-| `tabs` | Top-level mode switch (`Top` <-> `Dash`) and machine selectors. |
-| `list-row` | Collapsible tree rows (`depth`, `expanded`, `expand_action`) for LXC container process trees and agent rows. |
-| `meter` / `progress` | Visual proportion bars for CPU %, Memory GB, Swap %, and ZFS pool capacity. |
+| `section` | Flat semantic band inside a notebook; it never creates a second rail hierarchy. |
+| `titlebar_switch` | Top-level mode switch (`Top` <-> `Dash`). |
+| `list-row` | Flat machine, notebook, process, and evidence rows. Notebook rows use no icon, status, or nesting. |
 | `search-box` | Live filtering of processes, containers, and agent rows. |
-| `button` | Action triggers (`Refresh`, `Clean Leaks`, `Add Machine`, `Arm/Disarm`, `Hold`). |
+| `button` / row action | Explicit actions (`Kill…`, page turns, safe operator overrides). Live refresh is automatic. |
 | `toggle` | Supervision flags and auto-refresh intervals. |
+| `markdown` | Stable notebook prose rendered by the shared extended-markdown engine; typed plots land there. |
 
 ---
 
@@ -202,13 +293,32 @@ Dedicated diagnostic engine to explain and eliminate host lag:
    - Add LXC container process hierarchy extraction (cgroup-aware per-container process tree).
    - Add persistent `~/.yggterm/config/machines.json` loader and writer.
    - Add agent row resource footprint summation (CPU% and RSS RAM per seat).
-2. **Phase 2: Modern Card & Gauge Schema (`ytop::schema`)**:
-   - Implement the `Top` mode layout with System Gauges, ZFS Storage Card, and Collapsible LXC Container trees.
-   - Implement the `Dash` mode layout with Agent Fleet Rows, Resource Jankbox Profiling, and Supervision Controls.
-   - Eliminate plain unstyled markdown dumps in viewport; render native cards and structured rows.
+   - **Add `host/ebpf` probe (opt-in via `YTOP_EBPF=1`): `sched_switch`/`io_uring`/`zfs_delay` via `tracefs`, flamegraph `perf` sampling folded into Dash `ytrace` — Top deliberately does not collect this.**
+2. **Phase 2: Notebook-first shell (`ytop::schema`)**:
+   - Keep both modes as flat title-only shelves with no preamble partition;
+     place Top's inherited connected-host selector in notebook chrome.
+   - Ship purposeful `System Top`, `Yggdrasil System`, and `Yggterm
+     SysInternals` base books with structured live rows and actions.
+   - Move notebook and trace reads off the pane lock; refresh automatically with
+     stale-while-revalidate state.
 3. **Phase 3: Interactive Server & Actions (`ytop::server`, `ytop::osc`)**:
    - Handle tab switching (`top` <-> `dash`), machine selection, container expansion toggles, and `+ Add Machine` form submissions.
    - Handle `Clean Leaks & Stale Twins` and supervision actions.
+   - **Wire Dash `ytrace query|tail|incidents` notebooks and `host/ebpf` toggles to the same `filter`/`action` plumbing.**
 4. **Phase 4: CLI & Automation Verification**:
-   - Support `ytop --once --tab top`, `ytop --once --tab dash`, and `--json`.
+   - Support `ytop --once --tab top`, `ytop --once --tab dash`, and `--json` (both now emit `host/*` via probe; Dash additionally emits `ytrace` incidents/flamegraph JSON when `YTOP_EBPF` and `ytrace` are present).
    - Validate on live GUI with `yggterm` and test suites.
+5. **Phase 5: Libyggterm SDK — ytrace in every surface app (2026-08-23):**
+   - `yggterm`, `ychrome`, `yedit`, `paper`, `cellulose`, `yggtopo`, `yggdrasil-maker` each emit `ytrace` spans at viewport/rails/cwd-tree boundaries via `libyggterm` `emit_trace!`. Required probes: `viewport/mount`, `rails/select`, `cwd_tree/navigate`, `daemon_request`, `render/gui`, `web/policy`. Tracked in `libyggterm/docs/spec-app-architecture.md` — a surface without a probe is a `Dash` blind spot.
+6. **Phase 6: Retention policy:**
+   - Development hosts may retain larger trace generations than production
+     hosts, but notebooks query through ytrace interfaces rather than assuming
+     a private path or fixed quota. Retention, coverage, and oldest/newest event
+     time are evidence displayed beside every historical result.
+7. **Phase 7: Shared publication graphics and agent alerts:**
+   - Extend the implemented EMD v1 component tree toward full
+     grammar-of-graphics transforms, export, app-routed controls, accessibility,
+     and agent-readable analysis records.
+   - Add deterministic notebook alert predicates, safe scripted verbs, and a
+     bounded interface-LLM harness. Uptime Kuma remains until a status notebook
+     proves operational parity.

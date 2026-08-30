@@ -1,14 +1,18 @@
 //! ytop — `htop` + fleet agent rows + booter + ZFS/LXC topology, for a yggterm fleet.
 
 mod booter;
+mod complaints;
 mod fleet;
+mod legendary;
 mod manifest;
 mod notebook;
 mod osc;
 mod probe;
+mod rate;
 mod rows;
 mod schema;
 mod server;
+mod sysinternals;
 mod timeline;
 
 use anyhow::Result;
@@ -31,7 +35,8 @@ struct Args {
     /// Operational mode: "top" (machines, ZFS, LXC) or "dash" (agent fleet & jankbox)
     #[arg(long, value_parser = ["top", "dash"], default_value = "top")]
     mode: String,
-    /// Dash subtab: "rows", "jankbox", or "supervision"
+    /// Dash subtab: "rows" (fleet table), "jankbox" (ytrace complaints +
+    /// leaked/twin processes), or "supervision" (arming and quota holds).
     #[arg(long, value_parser = ["rows", "jankbox", "supervision"], default_value = "rows")]
     tab: String,
     /// Print one reading and exit, even inside yggterm.
@@ -43,11 +48,28 @@ struct Args {
     /// Run the host probe alone and print its JSON. `--probe <ssh-alias>` runs it there.
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     probe: Option<String>,
+    /// Print a notebook without a GUI. `--notebook` alone lists the shelf;
+    /// `--notebook <id>` lists its pages; add `--page <n>` for one page.
+    ///
+    /// ⭐ THE NOTEBOOKS ARE READINGS, SO THEY ARE CHECKABLE LIKE ONE. A page
+    /// that can only be seen inside a running window cannot be verified without
+    /// interrupting whoever is using that window — and the live blocks are the
+    /// half most worth checking, because they are the half that can go wrong
+    /// quietly.
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    notebook: Option<String>,
+    /// Which page of `--notebook`, 1-based.
+    #[arg(long)]
+    page: Option<usize>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     manifest::write_best_effort();
+
+    if let Some(id) = args.notebook {
+        return server::print_notebook(id.trim(), args.page);
+    }
 
     if let Some(host) = args.probe {
         let host = host.trim();
@@ -65,13 +87,13 @@ fn main() -> Result<()> {
                  printing one reading instead of opening a surface."
             );
         }
-        return server::print_once(&args.mode, args.json);
+        return server::print_once(&args.mode, &args.tab, args.json);
     }
 
     let control = server::spawn()?;
     {
         let mut pane = control.state.lock().unwrap();
-        pane.view.mode = args.mode.clone();
+        pane.view.select_mode(&args.mode);
     }
 
     let running = Arc::new(AtomicBool::new(true));

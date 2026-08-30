@@ -15,7 +15,7 @@ pub struct Sample {
     pub log_events: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Ring {
     t0_ms: u64,
     buckets: VecDeque<Sample>,

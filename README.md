@@ -5,13 +5,22 @@ host, and what is actually burning them right now — plus notebooks that read *
 
 > **One `ytop` sees five planes at once:** the server machine(s), the client machine you’re looking from, the `yggterm` terminal fleet, the `ychrome` browser surface, and the webapp in the viewport. A hitch in the app’s `fetch` span, a `render/gui` storm, a `zfs_delay` outlier, and a `media_capture` prompt all land as the same `ytrace` record kind, queried the same way, in the same notebook — so a frontend jank is correlated to a ZFS commit without switching tools.
 
-It ships **base notebooks for both Top and Dash — a few per mode as needed, not one each.** Top includes fleet topology + fleet rows + booter/monitor; Dash includes `daemon_request` hot paths + `render` storms + `attach`/`session`/`usability` and `ychrome/web` traces. Every underlying probe is a `ytrace` span/event/metric/incident, so `ytrace` replaces all hand-rolled probing and `ytop` is the only reader you need.
+It ships a curated base shelf. Both rails contain notebook titles only. **Top**
+opens `System Top`: its document bar inherits every host connected to the
+launching Yggterm, and its pages carry host/ZFS/LXC/process evidence and safe
+operational actions. **Dash** opens `Yggterm SysInternals`: daemon and row
+costs, monitor/booter health, histories, trace trouble, and operator overrides
+live in its pages. Additional notebooks are composed programmatically by
+agents; the GUI intentionally has no Compose button.
 
 It is a [libyggterm](https://github.com/yggdrasilhq/libyggterm) document-surface
-app: it ships **no UI code**. It declares a widget schema over the terminal's own
-control channel and yggterm paints it as native shell DOM — which is what keeps
-it screenshot-faithful and drivable by the host's automation, instead of a
-canvas nothing else can see into.
+app: it declares its surfaces over the terminal's control channel and yggterm
+paints the shell interaction widgets. Notebook prose uses libyggterm's shared
+`emd-renderer`; its versioned `emd` blocks now provide plots, sparklines,
+metrics, data grids, query panes, agent findings, and nested workbench layout.
+The renderer owns scales and SVG pixels; Ytop only emits typed evidence. This
+keeps the result screenshot-faithful, agent-readable, and reusable outside
+observability.
 
 Outside yggterm it is a plain CLI that prints the same reading, because an app
 that can only exist inside a GUI cannot be checked without one.
@@ -29,6 +38,23 @@ beta · 32 × Example CPU E2 · kernel 9.9.9-invented
   ├─ beta         2772.0% cpu    530 procs  (lxc)
   ├─ gamma          22.1% cpu     96 procs  (lxc)
 ```
+
+## Install
+
+**ynpm** — ships with yggterm. One manager keeps every yggdrasilhq binary current across
+the whole fleet: generations with rollback, drift-watching, one command.
+
+```sh
+ynpm install @ygghq/ytop
+```
+
+**No npm, no yggterm?** One curl, straight from the registry:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/ytop/main/install.sh | sh
+```
+
+Prebuilt for linux (x64, arm64) and macOS (x64, arm64).
 
 ## What it shows
 
@@ -49,6 +75,11 @@ that burned a core for an hour and has slept since reads as busy forever, and
 one that started spinning ten seconds ago reads as idle. A view built on it is a
 biography, not a live view. ytop samples `/proc/<pid>/stat` twice and reports
 the delta, which is what htop actually does.
+
+Each eligible process row has **Kill…**, which opens an explicit `TERM`, `INT`,
+or `KILL` chooser. Nothing is sent by selecting the row. PID 1 and Ytop itself
+are protected; TERM is the normal graceful choice and KILL is immediate last
+resort.
 
 **Booter.** Who is armed, when they are due, and the switch that turns it off.
 The fleet's booter is a watchdog that kicks stalled agent sessions; it could
@@ -75,9 +106,42 @@ These are the ones that changed the code, not just the prose:
 
 ## ytrace notebooks
 
-`ytop` in **Top mode** is the Linux tooling AXIOM — `ytrace` probes for `host/cpu_delta` (the delta `ps %CPU` hides), `host/zfs` (`zpool iostat`, `arcstat`, `zil_commit`), `host/ebpf` (`sched_switch`, `io_uring`, `zfs_delay`).
+`ytop` in **Top mode** is the Linux-tooling workbench: interval host/process
+sampling, ZFS, LXC, and the Yggdrasil System notebook. It remains useful when no
+application trace exists and explicitly reports the kernel probes it has not
+yet attached.
 
 `ytop` in **Dash mode** is the DTrace notebook — `ytrace query --app <app> --category <cat> --since <window> --top N` tables + `tail` timeline + `incidents` ranked by `trigger`. It goes beyond Chrome DevTools because it sees cross-process, cross-host spans (`web/policy` fetch, `SurfacePolicyGate::Pending`, `ssh -L` vs `ssh -D`).
+
+**A page can have a live half.** Shipped prose is frozen the moment it compiles, which is right for
+a story and useless for a state — "who is armed" and "when did that last fire" go stale in minutes.
+So a page may name one **live reading** that the viewport fills at render time from the same files
+the CLIs read. `Yggterm SysInternals` is the notebook built on it: the two supervision planes joined
+row by row, the seat census, every watcher's last-fired time against its cadence, the graphs, and
+four walkthroughs of what the machinery is *for*.
+
+Live trace summaries use stale-while-revalidate caching. Opening a page never
+waits for a trace directory walk: the first frame shows cached evidence or an
+honest collecting state, and later document-version polls deliver the result.
+The pane state lock is released before notebooks render, so a slow page cannot
+freeze sampling or other actions.
+
+The design and runtime contracts are in [DESIGN.md](DESIGN.md),
+[docs/spec-notebook-runtime.md](docs/spec-notebook-runtime.md), and
+[docs/spec-observability-graphics.md](docs/spec-observability-graphics.md).
+
+⛔ **Membership is a fact; dueness is a judgement.** A live block renders which rows are in which
+store and the fields those stores wrote about themselves. Whether a one-plane row is a *gap*, a
+deliberate stand-down, or a corpse mid-countdown belongs to the watchdogs' own verbs — a second copy
+of that reasoning here would drift, and then disagree about a live row on the day it mattered.
+
+Notebooks are readable with no GUI at all, for the same reason the rest of ytop is:
+
+```
+$ ytop --notebook                            # the shelf
+$ ytop --notebook dash-sysinternals          # its pages
+$ ytop --notebook dash-sysinternals --page 3 # one page, live blocks filled in
+```
 
 ## Building
 

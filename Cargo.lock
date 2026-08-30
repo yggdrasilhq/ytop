@@ -491,7 +491,7 @@ checksum = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538"
 
 [[package]]
 name = "ytop"
-version = "0.1.0"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -506,10 +506,11 @@ dependencies = [
 [[package]]
 name = "ytrace"
 version = "0.1.0"
-source = "git+https://github.com/yggdrasilhq/ytrace?branch=main#c1d2b8aabdf7b9132c42ff2df211d0f99779a4cb"
+source = "git+https://github.com/yggdrasilhq/ytrace?branch=main#6f0161071e6ba4d808ef6c8a42060f6efa1c08d7"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "serde",
  "serde_json",
 ]

@@ -1,0 +1,32 @@
+{
+  "name": "@ygghq/ytop",
+  "version": "0.1.6",
+  "description": "ytop - the yggdrasilhq build, delivered by ynpm",
+  "bin": {
+    "ytop": "bin/ytop"
+  },
+  "files": [
+    "bin/",
+    "finalize.mjs"
+  ],
+  "optionalDependencies": {
+    "@ygghq/ytop-linux-x64": "0.1.6",
+    "@ygghq/ytop-linux-arm64": "0.1.6",
+    "@ygghq/ytop-darwin-x64": "0.1.6",
+    "@ygghq/ytop-darwin-arm64": "0.1.6",
+    "@ygghq/ytop-win32-x64": "0.1.6",
+    "@ygghq/ytop-win32-arm64": "0.1.6"
+  },
+  "scripts": {
+    "postinstall": "node ./finalize.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yggdrasilhq/ytop.git"
+  },
+  "license": "GPL-3.0-or-later",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,94 @@
+name: ynpm publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x64, os: ubuntu-24.04, triple: ""}
+          - {target: linux-arm64, os: ubuntu-24.04-arm, triple: aarch64-unknown-linux-gnu}
+          - {target: darwin-x64, os: macos-15, triple: ""}
+          - {target: darwin-arm64, os: macos-14, triple: ""}
+          - {target: win32-x64, os: windows-2025, triple: ""}
+          - {target: win32-arm64, os: windows-2025, triple: aarch64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - name: Build release
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build --release --target ${{ matrix.triple }}
+          else
+            cargo build --release
+          fi
+      - name: Pack platform package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          set -e
+          BUILT="target/release"; [ -n "$TRIPLE" ] && BUILT="target/$TRIPLE/release"
+          EXE="ytop"; case "$TARGET" in win32-*) EXE="ytop.exe";; esac
+          # Per-target os/cpu: the installer then pulls ONE platform package
+          # instead of all six (optionalDependencies resolve by platform).
+          case "$TARGET" in
+            linux-x64)   PKG_OS=linux;  PKG_CPU=x64 ;;
+            linux-arm64) PKG_OS=linux;  PKG_CPU=arm64 ;;
+            darwin-x64)  PKG_OS=darwin; PKG_CPU=x64 ;;
+            darwin-arm64) PKG_OS=darwin; PKG_CPU=arm64 ;;
+            win32-x64)   PKG_OS=win32;  PKG_CPU=x64 ;;
+            win32-arm64) PKG_OS=win32;  PKG_CPU=arm64 ;;
+          esac
+          mkdir -p "pack/@ygghq/ytop-$TARGET/bin"
+          cp "$BUILT/$EXE" "pack/@ygghq/ytop-$TARGET/bin/ytop"
+          printf '{"name":"@ygghq/ytop-%s","version":"0.1.6","bin":{"ytop":"bin/ytop"},"os":["%s"],"cpu":["%s"],"license":"GPL-3.0-or-later","repository":{"type":"git","url":"git+https://github.com/yggdrasilhq/ytop.git"}}\n' "$TARGET" "$PKG_OS" "$PKG_CPU" > "pack/@ygghq/ytop-$TARGET/package.json"
+      - name: Publish platform package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # The build jobs run no actions/setup-node, so nothing wrote the
+          # auth mapping — npm publish answered ENEEDAUTH (run 33112881416,
+          # the first run whose failures were honest). Write it directly.
+          echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > ~/.npmrc
+          cd "pack/@ygghq/ytop-${{ matrix.target }}"
+          # ⛔ IDEMPOTENCE WITHOUT Lying. The old `|| echo already published`
+          # swallowed EVERY failure — a broken package.json (the literal-`{{`
+          # printf bug this run fixed) reported as a clean skip, and the run
+          # went green having published nothing. Only the genuine
+          # already-published conflict is a skip; every other error fails the
+          # step with its real output.
+          if ! npm publish --access public --provenance 2>pub_err.txt; then
+            grep -qE "EPUBLISHCONFLICT|previously published|cannot publish over" pub_err.txt || { cat pub_err.txt >&2; exit 1; }
+            echo "version already published — skipping (genuine conflict)"
+          fi
+          rm -f pub_err.txt
+
+  publish-main:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
