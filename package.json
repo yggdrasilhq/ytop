@@ -1,6 +1,6 @@
 {
   "name": "@ygghq/ytop",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "ytop - the yggdrasilhq build, delivered by ynpm",
   "bin": {
     "ytop": "bin/ytop"
