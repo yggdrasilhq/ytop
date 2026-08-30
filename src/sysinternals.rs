@@ -889,6 +889,291 @@ pub fn folds_md() -> String {
     md
 }
 
+/// ── CI plane — the single integration build (like booter/monitor, on dev) ───────
+
+fn ci_subs_raw() -> Vec<Value> {
+    let dir = relay().join("ci").join("subs");
+    let mut out = Vec::new();
+    let mut unreadable = Vec::new();
+    for v in read_store(&dir, &mut unreadable) {
+        out.push(v);
+    }
+    out.sort_by(|a, b| {
+        let pa = s(a, "project");
+        let pb = s(b, "project");
+        pa.cmp(&pb).then(s(a, "lane").cmp(&s(b, "lane")))
+    });
+    out
+}
+
+fn ci_builds_raw(limit: usize) -> Vec<Value> {
+    let dir = relay().join("ci").join("builds");
+    let mut out = Vec::new();
+    let mut unreadable = Vec::new();
+    for v in read_store(&dir, &mut unreadable) {
+        out.push(v);
+    }
+    out.sort_by(|a, b| f(b, "at").partial_cmp(&f(a, "at")).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(limit);
+    out
+}
+
+pub fn ci_subs_md(_report: &FleetRowsReport) -> String {
+    let subs = ci_subs_raw();
+    let cfg_path = relay().join("ci").join("ci.json");
+    let cfg: Option<Value> = std::fs::read_to_string(&cfg_path).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let mut md = String::from("## Enrolled lanes — who asked for the next build\n\n");
+    if subs.is_empty() {
+        md.push_str("> No lanes enrolled right now. `ygg-ci.py subscribe --lane lane/foo --project yggterm` (on `dev`, after `git push origin lane/foo`) is what puts one here. The watcher wakes every 300s (same cadence as booter/monitor) and merges `origin/main` + subs into `~/.yggterm/scratchpad/ci/<project>/integ-<ts>`.\n\n");
+    } else {
+        md.push_str("| project | lane | tip | age | want | by |\n| :--- | :--- | :--- | ---: | :--- | :--- |\n");
+        let now = now_secs();
+        for v in subs.iter().take(24) {
+            let lane = s(v, "lane");
+            let project = s(v, "project");
+            let tip = s(v, "tip_at_enlist");
+            let want = s(v, "want");
+            let by = short(&s(v, "by"));
+            let age = now - f(v, "enlisted_at");
+            md.push_str(&format!(
+                "| {} | `{}` | {} | {} | {} | `{}` |\n",
+                if project.is_empty() { "—" } else { &project },
+                if lane.is_empty() { "—" } else { &lane },
+                if tip.is_empty() { "—" } else { &tip[..tip.len().min(12)] },
+                ago(age),
+                if want.is_empty() { "next" } else { &want },
+                if by.is_empty() { "—" } else { &by }
+            ));
+        }
+        if subs.len() > 24 {
+            md.push_str(&format!("\n*{} more not listed.*\n", subs.len() - 24));
+        }
+    }
+    md.push_str("\n### Project recipe — how each project builds\n\n");
+    if let Some(c) = cfg {
+        if let Some(projs) = c.get("projects").and_then(|v| v.as_object()) {
+            md.push_str("| project | repo | host | interval | build | deploy |\n| :--- | :--- | :--- | ---: | :--- | :--- |\n");
+            for (name, v) in projs {
+                md.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} |\n",
+                    name,
+                    s(v, "repo"),
+                    s(v, "host"),
+                    ago(f(v, "interval")),
+                    s(v, "build").chars().take(48).collect::<String>(),
+                    s(v, "deploy").chars().take(32).collect::<String>()
+                ));
+            }
+        } else {
+            md.push_str("> No projects in `ci.json`.\n");
+        }
+    } else {
+        md.push_str(&format!("> No `ci.json` at `{}` — defaults are `yggterm` on `dev` every 300s.\n", cfg_path.display()));
+    }
+    let hold_path = relay().join("ci").join("ci.hold");
+    if let Ok(t) = std::fs::read_to_string(&hold_path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&t) {
+            let reason = s(&v, "reason");
+            let by = s(&v, "by");
+            md.push_str(&format!("\n⏸ **CI hold active** — {} by `{}`.\n", if reason.is_empty() { "no reason" } else { &reason }, by));
+        } else if !t.trim().is_empty() {
+            md.push_str(&format!("\n⏸ **CI hold active** — `{}`.\n", t.lines().next().unwrap_or("").trim()));
+        }
+    }
+    let disarm_path = relay().join("ci").join("ci.disarmed");
+    if disarm_path.exists() {
+        if let Ok(t) = std::fs::read_to_string(&disarm_path) {
+            if let Ok(v) = serde_json::from_str::<Value>(&t) {
+                md.push_str(&format!("\n⛔ **CI disarmed** — {}.\n", s(&v, "note")));
+            } else {
+                md.push_str("\n⛔ **CI disarmed**\n");
+            }
+        }
+    }
+    md.push_str("\n---\n\n*Enroll:* `ssh dev ygg-ci.py subscribe --lane lane/foo --project yggterm` after pushing. *Leave:* `unsubscribe` when done; `tick --dry-run` shows what would merge without building.\n");
+    md
+}
+
+pub fn ci_builds_md(_report: &FleetRowsReport) -> String {
+    let builds = ci_builds_raw(12);
+    let mut md = String::from("## Builds — what the last integrations produced\n\n");
+    if builds.is_empty() {
+        md.push_str("> No builds yet. The first `tick` after a subscription merges `origin/main` + lanes into an ephemeral worktree and `cargo build --release` once, then `scripts/deploy-fleet.sh` (proves `md5sum /proc/<pid>/exe` fleet-wide).\n\n");
+        return md;
+    }
+    md.push_str("| when | project | sha | lanes | conflicts | status | build |\n| :--- | :--- | :--- | ---: | ---: | :--- | :--- |\n");
+    for v in builds.iter().take(8) {
+        let at = f(v, "at");
+        let project = s(v, "project");
+        let sha = s(v, "sha");
+        let status = s(v, "status");
+        let build = if b(v, "build_ok") { "ok" } else if v.get("build_ok").is_none() { "—" } else { "fail" };
+        let lanes = v.get("lanes").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0);
+        let conflicts = v.get("conflicts").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0);
+        md.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
+            ago(now_secs() - at),
+            if project.is_empty() { "—" } else { &project },
+            if sha.is_empty() { "—" } else { &sha[..sha.len().min(8)] },
+            lanes,
+            conflicts,
+            if status.is_empty() { "—" } else { &status },
+            build
+        ));
+    }
+    // sparkline of builds over last 6h, bucketed per hour
+    let window_ms: u128 = 6 * 60 * 60 * 1000;
+    let buckets = 12usize;
+    let mut ts: Vec<u128> = builds.iter().filter_map(|v| {
+        let at = f(v, "at");
+        if at > 0.0 { Some((at * 1000.0) as u128) } else { None }
+    }).collect();
+    ts.sort_unstable();
+    let series = bucket_counts(&ts, window_ms, buckets);
+    let peak = series.iter().cloned().fold(0.0_f64, f64::max);
+    md.push_str(&format!("\n**Builds last 6h ({} buckets):** `{} ` peak {} — each bucket {}m.\n", buckets, spark(&series), peak as i64, window_ms as u64 / buckets as u64 / 60_000));
+    // show conflicts detail for most recent
+    if let Some(latest) = builds.first() {
+        if let Some(confs) = latest.get("conflicts").and_then(|v| v.as_array()) {
+            if !confs.is_empty() {
+                md.push_str("\n### Latest conflicts — excluded only, fleet still shipped the merged subset\n\n");
+                md.push_str("| lane | reason |\n| :--- | :--- |\n");
+                for c in confs.iter().take(6) {
+                    md.push_str(&format!("| `{}` | {} |\n", s(c, "lane"), s(c, "reason")));
+                }
+                md.push_str("\n*Fix:* `git fetch && rebase origin/main && push --force-with-lease`; next tick retries — do not `unsubscribe`.\n");
+            }
+        }
+    }
+    md
+}
+
+pub fn ci_watchers_md(_report: &FleetRowsReport) -> String {
+    let hb_path = relay().join("ci").join("ci.heartbeat");
+    let log_path = relay().join("ci").join("ci.log");
+    let cfg_path = relay().join("ci").join("ci.json");
+    let mut md = String::from("## CI watcher — when it last fired\n\n");
+    let now = now_secs();
+    let hb: Option<Value> = std::fs::read_to_string(&hb_path).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let log_age = mtime_secs(&log_path).map(|m| now - m);
+    let hb_age = hb.as_ref().map(|h| now - f(h, "ts"));
+    let write_age = hb.as_ref().map(|h| now - f(h, "last_log_write_ts"));
+    let cadence: Option<f64> = std::fs::read_to_string(&cfg_path).ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("projects").and_then(|p| p.get("yggterm")).and_then(|p| p.get("interval")).and_then(|x| x.as_f64()).or(Some(300.0)));
+    match hb {
+        Some(h) => {
+            let loop_age = now - f(&h, "ts");
+            let w_age = now - f(&h, "last_log_write_ts");
+            let up = now - f(&h, "started_ts");
+            let mute = w_age > loop_age.max(60.0) * 6.0;
+            md.push_str(&format!(
+                "| watcher | last loop | last log write | up | cadence | verdict |\n| :--- | ---: | ---: | ---: | ---: | :--- |\n| **ci watcher** | {} ago | {} ago | {} | {} | {} |\n",
+                ago(loop_age),
+                ago(w_age),
+                ago(up),
+                cadence.map(|c| ago(c)).unwrap_or_else(|| "300s".to_string()),
+                if mute { format!("⛔ MUTE — loop {} ago but log {} ago", ago(loop_age), ago(w_age)) } else { verdict_for(Some(loop_age), cadence) }
+            ));
+            md.push_str(&format!("\n* pid {} · host {} · log {} ago*\n", i(&h, "pid"), s(&h, "host"), ago(w_age)));
+        }
+        None => {
+            md.push_str(&format!(
+                "| watcher | last log | cadence | verdict |\n| :--- | ---: | ---: | :--- |\n| **ci watcher** | {} | {} | {} |\n",
+                log_age.map(|a| format!("{} ago", ago(a))).unwrap_or_else(|| "never".to_string()),
+                cadence.map(|c| ago(c)).unwrap_or_else(|| "300s".to_string()),
+                if log_age.is_none() { "NEVER SEEN — no log".to_string() } else { verdict_for(log_age, cadence) }
+            ));
+            md.push_str("\n⚠ No `ci.heartbeat` — the log's mtime is the only evidence. A ticking loop with a mute log looks healthy from outside.\n");
+        }
+    }
+    if let Some(a) = hb_age { let _ = a; }
+    if let Some(a) = write_age { let _ = a; }
+    // last build word
+    let builds = ci_builds_raw(1);
+    if let Some(b) = builds.first() {
+        md.push_str(&format!("\n**Last build:** `{}` {} — {} merged, {} conflicts — {}\n", s(b, "id"), s(b, "project"), b.get("lanes").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0), b.get("conflicts").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0), s(b, "status")));
+    }
+    md.push_str("\n---\n\n*Timer, not a burn:* `watch` sleeps 300s between `fetch+stat` ticks; a clean tick costs no build.\n");
+    md
+}
+
+/// Dedicated booter view — armed rows only, not the combined armings map.
+pub fn booter_subs_md(report: &FleetRowsReport) -> String {
+    let p = planes();
+    let mut md = String::from("## Armed rows — booter subscriptions only\n\n");
+    let mut armed: Vec<&Armed> = p.armed.iter().collect();
+    armed.sort_by(|a, b| a.campaign.cmp(&b.campaign).then(a.uuid.cmp(&b.uuid)));
+    if armed.is_empty() {
+        md.push_str("> No booter subscriptions. `ygg-booter.py subscribe --campaign <name>` arms a row; `list` shows who is armed. The booter is a dumb timer — it types `continue` when a row goes quiet too long.\n");
+    } else {
+        md.push_str("| row | campaign | kind | age / max | boots | state | purpose |\n| :--- | :--- | :--- | ---: | ---: | :--- | :--- |\n");
+        for a in armed.iter().take(20) {
+            let state = if a.lapsed { format!("lapsed — {}", if a.lapsed_reason.is_empty() { "no reason" } else { &a.lapsed_reason }) } else if a.gone_sightings > 0 { format!("gone ×{} — retiring", a.gone_sightings) } else if a.escalated { "escalated".to_string() } else if a.blind_skips > 0 { format!("blind×{}", a.blind_skips) } else { "—".to_string() };
+            let note = if a.note.is_empty() { "—".to_string() } else { a.note.chars().take(48).collect::<String>() };
+            md.push_str(&format!(
+                "| `{}` @{} | {} | {} | {} / {:.0}h | {} | {} | {} |\n",
+                short(&a.uuid), a.host, if a.campaign.is_empty() { "—" } else { &a.campaign }, if a.kind.is_empty() { "task" } else { &a.kind }, ago(a.age_secs), a.max_hours, a.boots, state, note
+            ));
+        }
+        if armed.len() > 20 { md.push_str(&format!("\n*{} more not listed.*\n", armed.len() - 20)); }
+    }
+    if !p.unreadable.is_empty() {
+        md.push_str(&format!("\n⛔ {} unreadable: {}\n", p.unreadable.len(), p.unreadable.join(", ")));
+    }
+    // quota hold banner like armings
+    match &report.quota_hold {
+        Some(h) => md.push_str(&format!("\n⏸ **Quota hold ACTIVE — {h}** — booter standing down.\n")),
+        None => md.push_str("\n⚡ No quota hold.\n"),
+    }
+    md
+}
+
+pub fn booter_watcher_md(_report: &FleetRowsReport) -> String {
+    let mut md = String::from("## Booter watcher — dumb timer, outside the session\n\n");
+    for w in watchers().into_iter().filter(|w| w.name.contains("booter")) {
+        md.push_str(&format!("| watcher | last fired | cadence | verdict |\n| :--- | ---: | ---: | :--- |\n| **{}** | {} | {} | {} |\n\n*{}*\n", w.name, w.last_fired_secs.map(|a| format!("{} ago", ago(a))).unwrap_or_else(|| "never".to_string()), w.cadence_secs.map(|c| format!("{} ({})", ago(c), w.cadence_source)).unwrap_or_else(|| w.cadence_source.to_string()), w.verdict, w.detail));
+    }
+    md.push_str("\n---\n\n*Mute check:* loop instant vs last log write — a ticking loop with a mute log supervises nobody.\n");
+    md
+}
+
+/// Dedicated monitor view — watched rows only.
+pub fn monitor_subs_md(_report: &FleetRowsReport) -> String {
+    let p = planes();
+    let mut md = String::from("## Watched rows — monitor supervision only\n\n");
+    let mut watched: Vec<&Watched> = p.watched.iter().collect();
+    watched.sort_by(|a, b| a.seat.cmp(&b.seat).then(a.uuid.cmp(&b.uuid)));
+    if watched.is_empty() {
+        md.push_str("> No monitor subscriptions. `ygg-monitor.py subscribe --role orchestrator --escalate-to <uuid>` attaches a row; `list` shows who is watched. The monitor judges *why* a row is quiet.\n");
+    } else {
+        md.push_str("| row | seat | campaign | role | escalates to | age | intent |\n| :--- | :--- | :--- | :--- | :--- | ---: | :--- |\n");
+        for w in watched.iter().take(20) {
+            let target = if w.owner_pinned { "🙋 pinned — owner holds".to_string() } else if w.escalate_to.is_empty() { "—".to_string() } else if w.escalate_host.is_empty() { short(&w.escalate_to) } else { format!("{} @{}", short(&w.escalate_to), w.escalate_host) };
+            let intent = if w.intent.is_empty() { "—".to_string() } else { w.intent.chars().take(40).collect::<String>() };
+            md.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} | {} | {} |\n",
+                short(&w.uuid), if w.seat.is_empty() { "—" } else { &w.seat }, if w.campaign.is_empty() { "—" } else { &w.campaign }, if w.role.is_empty() { "—" } else { &w.role }, target, ago(w.age_secs), intent
+            ));
+        }
+        if watched.len() > 20 { md.push_str(&format!("\n*{} more not listed.*\n", watched.len() - 20)); }
+    }
+    if !p.never_arm.is_empty() {
+        md.push_str(&format!("\n🙋 **never-arm:** {} — a human types there, neither plane may touch it.\n", p.never_arm.join(", ")));
+    }
+    md
+}
+
+pub fn monitor_watcher_md(_report: &FleetRowsReport) -> String {
+    let mut md = String::from("## Monitor watcher — judgement, not a timer\n\n");
+    for w in watchers().into_iter().filter(|w| w.name.contains("monitor")) {
+        md.push_str(&format!("| watcher | last fired | cadence | verdict |\n| :--- | ---: | ---: | :--- |\n| **{}** | {} | {} | {} |\n\n*{}*\n", w.name, w.last_fired_secs.map(|a| format!("{} ago", ago(a))).unwrap_or_else(|| "never".to_string()), w.cadence_secs.map(|c| format!("{} ({})", ago(c), w.cadence_source)).unwrap_or_else(|| w.cadence_source.to_string()), w.verdict, w.detail));
+    }
+    let episodes = std::fs::read_dir(relay().join("monitor-episodes")).map(|d| d.flatten().count()).unwrap_or(0);
+    md.push_str(&format!("\n*{} escalation episode(s) on file.*\n", episodes));
+    md
+}
+
 /// How far back the graph page looks, and how long a drawn page is reused.
 const GRAPH_WINDOW_MS: u128 = 6 * 60 * 60 * 1000;
 /// ⛔ THIS CAP IS A WINDOW TRUNCATION IN DISGUISE. `tail` returns the last N
@@ -1116,6 +1401,13 @@ pub fn live_widgets(kind: &str, page_id: &str, report: &FleetRowsReport, blockin
         "cold" => cold_md(report),
         "rolls" => rolls_md(),
         "folds" => folds_md(),
+        "ci_subs" => ci_subs_md(report),
+        "ci_builds" => ci_builds_md(report),
+        "ci_watchers" => ci_watchers_md(report),
+        "booter_subs" => booter_subs_md(report),
+        "booter_watcher" => booter_watcher_md(report),
+        "monitor_subs" => monitor_subs_md(report),
+        "monitor_watcher" => monitor_watcher_md(report),
         // The Legendary Bugs blocks live in their own module: they share this
         // dispatcher rather than a second one, so a page names a reading and
         // does not have to know which file serves it.

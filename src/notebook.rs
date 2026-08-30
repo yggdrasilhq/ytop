@@ -103,6 +103,9 @@ pub fn notebook_dir() -> std::path::PathBuf {
 /// shelf holds one vocabulary while the numbers stay current.
 pub const OVERVIEW_ID: &str = "overview";
 pub const DASH_HOME_ID: &str = "dash-sysinternals";
+pub const DASH_CI_ID: &str = "dash-sysinternals-ci";
+pub const DASH_BOOTER_ID: &str = "dash-sysinternals-booter";
+pub const DASH_MONITOR_ID: &str = "dash-sysinternals-monitor";
 pub const TOP_YGGDRASIL_ID: &str = "top-yggdrasil-system";
 pub const TOP_CLINIC_ID: &str = "top-linux-performance-clinic";
 pub const DASH_TRACING_GUIDE_ID: &str = "dash-tracing-field-guide";
@@ -130,6 +133,9 @@ fn is_shipped(id: &str) -> bool {
         id,
         OVERVIEW_ID
             | DASH_HOME_ID
+            | DASH_CI_ID
+            | DASH_BOOTER_ID
+            | DASH_MONITOR_ID
             | TOP_YGGDRASIL_ID
             | TOP_CLINIC_ID
             | DASH_TRACING_GUIDE_ID
@@ -872,6 +878,120 @@ fn base_notebooks() -> Vec<Notebook> {
                 },
             ],
         },
+        // Dash — CI system (under SysInternals group)
+        Notebook {
+            id: DASH_CI_ID.to_string(),
+            title: "CI system".to_string(),
+            mode: "dash".to_string(),
+            description: "The single integration build on dev: who is enrolled, what the last build shipped, conflicts and the watcher that owns the fleet deploy.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-sysinternals-ci-p1".to_string(),
+                    title: "1. Enrolled lanes".to_string(),
+                    markdown: "# CI — who asked for the next build\n\nAny gitcoding project can enroll a lane. The CI watcher on `dev` (timer, not a burn) merges `origin/main` + every subscribed `lane/*` into an ephemeral worktree under `~/.yggterm/scratchpad/ci/<project>/integ-<ts>`, builds once (`cargo build --release` for yggterm), then `scripts/deploy-fleet.sh` proves `md5sum /proc/<pid>/exe` fleet-wide. One artefact, many testers.\n\n**Enroll:** `ygg-ci.py subscribe --lane lane/foo --project yggterm` (on `dev`, after `git push origin lane/foo`). **List:** `ygg-ci.py list`. **What would merge:** `tick --dry-run`. **Leave:** `unsubscribe` when done. Tune any project via `ygg-ci.py tune --project myapp --repo ~/gh/myapp --build \"npm run build\"` — the watcher picks it up next tick.\n\nThe table below is the membership the watcher will merge on its next firing.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "daemon_request".to_string(), name: "snapshot".to_string(), since_ms: 3600000 }],
+                    chart: Some("table".to_string()),
+                    live: Some("ci_subs".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-ci-p2".to_string(),
+                    title: "2. Builds & conflicts".to_string(),
+                    markdown: "# Builds — what the integrations produced\n\nEach `tick` records `~/.yggterm/relay/ci/builds/<id>.json`: main sha, lanes merged, conflicts excluded, build/deploy verdict. A lane that conflicts on the same hunk is excluded only — the build still ships the merged subset, so one conflict never blocks the fleet.\n\n**Same file, different hunks:** auto-merged. **Same hunk:** second lane excluded, `conflicts:[{lane,reason}]` recorded. Fix is `git fetch && rebase origin/main && push --force-with-lease`; next dirty tip retries automatically — do not `unsubscribe`/`re-subscribe`.\n\nThe sparkline is builds per bucket over the last 6 h — shape of integration pressure, not a health number.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "daemon_request".to_string(), name: "hot_restart".to_string(), since_ms: 21600000 }],
+                    chart: Some("sparkline".to_string()),
+                    live: Some("ci_builds".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-ci-p3".to_string(),
+                    title: "3. Watcher & deploy".to_string(),
+                    markdown: "# CI watcher — timer, not a burn\n\n`watch` sleeps 300 s between `fetch+stat` ticks; a clean tick costs no build. `subscribe` auto-spawns the watcher if none is alive. `ci.heartbeat` carries loop instant + last log write — the pair that catches a mute watcher (loop ticking into a closed file looks healthy from outside).\n\n`hold` / `disarm` are the fleet-wide brakes: red `main`, broken toolchain, or a manual stand-down. They keep subscriptions and refuse to build until cleared, same shape as `booter`.\n\nFor `yggterm` the deploy is `scripts/deploy-fleet.sh` — the same script a human uses, which sweeps `dev + live GUI + oc`, verifies read-back checksums, and holds the deploy lease. No second deploy path.\n\nA silent watcher is the failure with no symptom — the table is a clock, not a status chip.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "heartbeat".to_string(), name: "panic".to_string(), since_ms: 3600000 }],
+                    chart: Some("timeline".to_string()),
+                    live: Some("ci_watchers".to_string()),
+                    composed: false,
+                },
+            ],
+        },
+        // Dash — Booter system (under SysInternals group)
+        Notebook {
+            id: DASH_BOOTER_ID.to_string(),
+            title: "Booter system".to_string(),
+            mode: "dash".to_string(),
+            description: "The dumb timer that kicks a stalled row from outside it — who is armed, the watcher that fires, and the wake ledger.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-sysinternals-booter-p1".to_string(),
+                    title: "1. Armed rows".to_string(),
+                    markdown: "# Booter — who is armed\n\nA session subscribes to the booter; a detached watcher — one that outlives the session — types `continue` when it goes quiet. It has to be outside: a stalled session cannot boot itself, because the stall *is* the turn ending early.\n\nThe table is the membership the watcher counts, not a judgement — `lapsed`, `gone×N`, `blind×N` are the booter's own countdown fields, and from that moment the row is armed on paper and watched by nothing.\n\n**Arm:** `ygg-booter.py subscribe --campaign <name>` · **List:** `list --json` · **Hold:** `hold --until 2h` when the account is rate-limited (one sighting holds the whole fleet, because the limit is account-wide).\n\nA row armed on the booter and on nothing else gets woken, but if the wake does not take the escalation has no address — page 1 in SysInternals shows the asymmetry that matters.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "ui".to_string(), name: "block".to_string(), since_ms: 3600000 }],
+                    chart: Some("table".to_string()),
+                    live: Some("booter_subs".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-booter-p2".to_string(),
+                    title: "2. Watcher & holds".to_string(),
+                    markdown: "# Booter watcher — alive vs audible\n\nThe booter reports two instants: loop `ts` and `last_log_write_ts`. A loop ticking into a closed file looks healthy and supervises nobody — the pair is the only thing that catches it. `disarm` keeps subscriptions and refuses to act; `hold` is fleet-wide for rate limits.\n\nA quiet fleet and a stopped watcher produce identical evidence — nothing — so the table is a clock. `FRESH` means the clock moved, not that the job was done well; a mute watcher still ticks.\n\nThe graph is `ui/block` density over the same window — a wake that causes a block and a block that caused a wake look identical without the ledger on the next page.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "heartbeat".to_string(), name: "panic".to_string(), since_ms: 3600000 }],
+                    chart: Some("timeline".to_string()),
+                    live: Some("booter_watcher".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-booter-p3".to_string(),
+                    title: "3. Wake ledger".to_string(),
+                    markdown: "# Wake ledger — what the booter did\n\nThe booter's only output is a line in `~/.yggterm/relay/booter.log`: verdict, row, window. The table tallies `BOOT#`, `ESCALATE`, `RATE-LIMITED`, `SKIP:draft-race`, etc., over the last 512 KB — the action column is the watchdog saying what it did.\n\nA boot that was not delivered is a failed wake wearing the word `BOOT` — folding it in with successes would report the safety net as having caught something it did not.\n\nUse with page 2: a ledger that is empty while the watcher is `SILENT` is a gap, not calm.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "ui".to_string(), name: "block".to_string(), since_ms: 21600000 }],
+                    chart: Some("timeline".to_string()),
+                    live: Some("wakes".to_string()),
+                    composed: false,
+                },
+            ],
+        },
+        // Dash — Monitor system (under SysInternals group)
+        Notebook {
+            id: DASH_MONITOR_ID.to_string(),
+            title: "Monitor system".to_string(),
+            mode: "dash".to_string(),
+            description: "The judgement: why a row is quiet, who should hear, and the episodes that prove it.".to_string(),
+            author: "ytop".to_string(),
+            created_at_ms: now_ms(),
+            pages: vec![
+                Page {
+                    id: "dash-sysinternals-monitor-p1".to_string(),
+                    title: "1. Watched rows".to_string(),
+                    markdown: "# Monitor — who is watched\n\nAny session can `attach` to a running orchestrator and from then on is supervised like a cluster row. The monitor judges *why* a row is quiet: thinking (busy `cpu`), abandoned (at rest `cpu` for `600 s` with no descendant tool call), out of context, or owner-pinned (a human has taken it back, every verb skips it deliberately).\n\n**Attach:** `ygg-monitor.py subscribe --role worker --escalate-to <orch uuid>` · **List:** `list` · **Pinned:** `never-arm.tsv` asserts a human types there, so it is never counted as an unsupervised gap.\n\nA row watched and not armed gets no wake — somebody would hear, but nothing wakes it first. The SysInternals supervision map shows the join that matters.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "daemon_request".to_string(), name: "status".to_string(), since_ms: 3600000 }],
+                    chart: Some("table".to_string()),
+                    live: Some("monitor_subs".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-monitor-p2".to_string(),
+                    title: "2. Watcher & episodes".to_string(),
+                    markdown: "# Monitor watcher — why, not just how long\n\nA timer can ask \"has this been quiet too long\"; the monitor asks *why* and the why decides the action. Mid-turn and thinking — leave it alone. Mid-turn and abandoned — wake it via PTY, not composer (composer races input). Out of context — relay, not wake.\n\nThe watcher has no heartbeat file; its `monitor.log` mtime is weaker evidence and it says so. Episodes are the lanes it has escalated once — one per stalled row, so a second view does not page a person twice.\n\nA `rate-limited` verdict never escalates — the account cannot spend, a human cannot grant quota, and a page would teach people to ignore it.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "heartbeat".to_string(), name: "panic".to_string(), since_ms: 3600000 }],
+                    chart: Some("timeline".to_string()),
+                    live: Some("monitor_watcher".to_string()),
+                    composed: false,
+                },
+                Page {
+                    id: "dash-sysinternals-monitor-p3".to_string(),
+                    title: "3. Escalations & graphs".to_string(),
+                    markdown: "# Escalations — the graphs\n\nDash is exclusively ytrace, so every series here is a file-first read of `ytrace.jsonl`. The sparkline is `ui/block` and `daemon_request/snapshot` mean p95 per bucket — an empty bucket draws as the floor and means nothing happened, never it got fast. Each sparkline is normalised against its own peak, printed beside it.\n\nAn escalation is a fact, not a failure: a row that escalated is one a person or orchestrator now own. The table is counts per bucket — one thing that nothing clears, re-sampled every minute, is one problem and not three hundred.\n\nUntil the watchdogs emit ytrace, wakes and escalations are parsed prose in a log — that gap is why a wake cannot be correlated against the `ui/block` it caused.".to_string(),
+                    ytrace_queries: vec![YtraceQuery { provider: "yggterm".to_string(), category: "ui".to_string(), name: "block".to_string(), since_ms: 21600000 }, YtraceQuery { provider: "yggterm".to_string(), category: "daemon_request".to_string(), name: "snapshot".to_string(), since_ms: 7200000 }],
+                    chart: Some("sparkline".to_string()),
+                    live: Some("graphs".to_string()),
+                    composed: false,
+                },
+            ],
+        },
         // Top — a host-level, Yggdrasil-aware systems notebook.
         Notebook {
             id: TOP_YGGDRASIL_ID.to_string(),
@@ -1099,6 +1219,9 @@ fn base_notebooks() -> Vec<Notebook> {
                 notebook.id.as_str(),
                 OVERVIEW_ID
                     | DASH_HOME_ID
+                    | DASH_CI_ID
+                    | DASH_BOOTER_ID
+                    | DASH_MONITOR_ID
                     | TOP_YGGDRASIL_ID
                     | TOP_CLINIC_ID
                     | DASH_TRACING_GUIDE_ID
@@ -1153,9 +1276,12 @@ pub fn list_notebooks(mode_filter: Option<&str>) -> Vec<Notebook> {
             ("top", TOP_CLINIC_ID) => 2,
             ("top", "top-legendary-bugs") => 3,
             ("dash", DASH_HOME_ID) => 0,
-            ("dash", DASH_TRACING_GUIDE_ID) => 1,
-            ("dash", OVERVIEW_ID) => 2,
-            ("dash", "dash-legendary-bugs") => 3,
+            ("dash", DASH_CI_ID) => 1,
+            ("dash", DASH_BOOTER_ID) => 2,
+            ("dash", DASH_MONITOR_ID) => 3,
+            ("dash", DASH_TRACING_GUIDE_ID) => 4,
+            ("dash", OVERVIEW_ID) => 5,
+            ("dash", "dash-legendary-bugs") => 6,
             _ => 100,
         }
     }

@@ -38,7 +38,10 @@ impl Default for View {
             // is no nameless view you reach by having selected nothing.
             selected_notebook: Some(crate::notebook::OVERVIEW_ID.to_string()),
             selected_page: Some(crate::notebook::overview_page_id(MODE_TOP)),
-            expanded_notebooks: vec![crate::notebook::OVERVIEW_ID.to_string()],
+            expanded_notebooks: vec![
+                crate::notebook::OVERVIEW_ID.to_string(),
+                crate::notebook::DASH_HOME_ID.to_string(),
+            ],
             process_signal_target: None,
         }
     }
@@ -170,15 +173,72 @@ pub fn rail_view(view: &View, _machines: &[Machine], report: &FleetRowsReport) -
     // Both modes begin here. A rail is navigation, not a miniature dashboard;
     // connected machines and operational controls live in System Top itself.
     widgets.push(section("Notebooks", false));
-    for notebook in crate::notebook::list_notebooks(Some(&view.mode)) {
-        let selected = view.selected_notebook.as_deref() == Some(&notebook.id);
-        widgets.push(json!({
-            "kind": "list-row",
-            "id": format!("notebook:{}", notebook.id),
-            "title": notebook.title,
-            "selected": selected,
-            "row_action": format!("page_open:{}:0", notebook.id),
-        }));
+    let notebooks = crate::notebook::list_notebooks(Some(&view.mode));
+    // ── Dash: Yggterm SysInternals as a row-group header for its three systems ──
+    let is_dash_group = view.mode == MODE_DASH
+        && notebooks.iter().any(|n| n.id == crate::notebook::DASH_CI_ID);
+    if is_dash_group {
+        // group header = the existing SysInternals notebook, now also expandable
+        if let Some(header) = notebooks.iter().find(|n| n.id == crate::notebook::DASH_HOME_ID) {
+            let selected = view.selected_notebook.as_deref() == Some(&header.id);
+            let expanded = view.expanded_notebooks.contains(&header.id);
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("notebook:{}", header.id),
+                "title": header.title,
+                "selected": selected,
+                "row_action": format!("page_open:{}:0", header.id),
+                "depth": 0,
+                "expanded": expanded,
+                "expand_action": format!("notebook_toggle:{}", header.id),
+            }));
+            if expanded {
+                for child_id in [
+                    crate::notebook::DASH_CI_ID,
+                    crate::notebook::DASH_BOOTER_ID,
+                    crate::notebook::DASH_MONITOR_ID,
+                ] {
+                    if let Some(child) = notebooks.iter().find(|n| n.id == child_id) {
+                        let sel = view.selected_notebook.as_deref() == Some(&child.id);
+                        widgets.push(json!({
+                            "kind": "list-row",
+                            "id": format!("notebook:{}", child.id),
+                            "title": child.title,
+                            "selected": sel,
+                            "row_action": format!("page_open:{}:0", child.id),
+                            "depth": 1,
+                        }));
+                    }
+                }
+            }
+        }
+        // remaining notebooks that are not part of the group
+        for notebook in notebooks.iter().filter(|n| {
+            n.id != crate::notebook::DASH_HOME_ID
+                && n.id != crate::notebook::DASH_CI_ID
+                && n.id != crate::notebook::DASH_BOOTER_ID
+                && n.id != crate::notebook::DASH_MONITOR_ID
+        }) {
+            let selected = view.selected_notebook.as_deref() == Some(&notebook.id);
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("notebook:{}", notebook.id),
+                "title": notebook.title,
+                "selected": selected,
+                "row_action": format!("page_open:{}:0", notebook.id),
+            }));
+        }
+    } else {
+        for notebook in notebooks {
+            let selected = view.selected_notebook.as_deref() == Some(&notebook.id);
+            widgets.push(json!({
+                "kind": "list-row",
+                "id": format!("notebook:{}", notebook.id),
+                "title": notebook.title,
+                "selected": selected,
+                "row_action": format!("page_open:{}:0", notebook.id),
+            }));
+        }
     }
 
     let live_note = if view.mode == MODE_TOP {
@@ -1153,6 +1213,44 @@ mod overview_view_tests {
             .find(|widget| widget["kind"] == "list-row")
             .unwrap();
         assert_eq!(first_row["title"], "Yggterm SysInternals");
+    }
+
+    #[test]
+    fn dash_rail_groups_sysinternals_children_under_header() {
+        let mut view = View::default();
+        view.select_mode(MODE_DASH);
+        // default is expanded
+        assert!(view.expanded_notebooks.contains(&crate::notebook::DASH_HOME_ID.to_string()));
+        let rail = rail_view(&view, &[], &FleetRowsReport::default());
+        let rows: Vec<_> = rail["widgets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w["id"].as_str().is_some_and(|id| id.starts_with("notebook:")))
+            .collect();
+        let header_idx = rows
+            .iter()
+            .position(|w| w["id"] == "notebook:dash-sysinternals")
+            .expect("sysinternals header must be on dash shelf");
+        assert_eq!(rows[header_idx]["depth"], 0);
+        assert_eq!(rows[header_idx]["expanded"], true);
+        assert_eq!(rows[header_idx + 1]["id"], "notebook:dash-sysinternals-ci");
+        assert_eq!(rows[header_idx + 1]["depth"], 1);
+        assert_eq!(rows[header_idx + 2]["id"], "notebook:dash-sysinternals-booter");
+        assert_eq!(rows[header_idx + 2]["depth"], 1);
+        assert_eq!(rows[header_idx + 3]["id"], "notebook:dash-sysinternals-monitor");
+        assert_eq!(rows[header_idx + 3]["depth"], 1);
+        // collapsed hides children
+        view.expanded_notebooks.retain(|id| id != crate::notebook::DASH_HOME_ID);
+        let rail2 = rail_view(&view, &[], &FleetRowsReport::default());
+        let rows2: Vec<_> = rail2["widgets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w["id"].as_str().is_some_and(|id| id.starts_with("notebook:")))
+            .collect();
+        assert!(!rows2.iter().any(|w| w["id"] == "notebook:dash-sysinternals-ci"));
+        assert_eq!(rows2[header_idx]["expanded"], false);
     }
 
     #[test]
